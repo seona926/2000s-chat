@@ -1,9 +1,11 @@
 import { DurableObject } from 'cloudflare:workers'
-import { rooms, type ChatStyle, type Line, type Member } from './rooms'
+import { rooms, type ChatStyle, type GameRound, type Line, type Member, type RoomPoll } from './rooms'
 
 type Env = { CHAT: DurableObjectNamespace<Chat>; ASSETS: Fetcher }
-type Guest = Member & { room: string; queued: number; last: number; lastReport: number }
+type Guest = Member & { room: string; queued: number; last: number; lastReport: number; status: 'chatting' | 'away' }
 type Evidence = { room: string; line: Line }
+type PollData = Omit<RoomPoll, 'myVote'> & { room: string; voters: Record<string, string> }
+type GameData = Omit<GameRound, 'players' | 'joined'> & { room: string; players: Record<string, { member: Member; score: number }> }
 const nicknameKey = (name: string) => name.normalize('NFKC').toLocaleLowerCase('ko-KR').replace(/\s+/g, ' ')
 
 export default {
@@ -18,6 +20,8 @@ export default {
 
 export class Chat extends DurableObject<Env> {
   private evidence: Evidence[] = []
+  private polls = new Map<string, PollData>()
+  private games = new Map<string, GameData>()
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -29,7 +33,7 @@ export class Chat extends DurableObject<Env> {
     const taken = new Set(this.sockets().map(socket => nicknameKey(this.guest(socket).name)))
     let name: string
     do { name = '손님' + (1000 + crypto.getRandomValues(new Uint16Array(1))[0] % 9000) } while (taken.has(nicknameKey(name)))
-    const guest = { id: crypto.randomUUID(), name, room: '', queued: 0, last: 0, lastReport: 0 }
+    const guest = { id: crypto.randomUUID(), name, room: '', queued: 0, last: 0, lastReport: 0, status: 'chatting' as const }
     this.ctx.acceptWebSocket(server)
     this.save(server, guest)
     this.send(server, { type: 'hello', id: guest.id, name: guest.name })
@@ -62,9 +66,31 @@ export class Chat extends DurableObject<Env> {
     const waitingCount = guests.filter(guest => guest.queued > 0).length
     sockets.forEach((socket, index) => {
       const room = guests[index].room
-      const members = room ? guests.filter(guest => guest.room === room).map(({ id, name }) => ({ id, name })) : []
-      this.send(socket, { type: 'presence', total: guests.length, waitingCount, counts, members })
+      const members = room ? guests.filter(guest => guest.room === room).map(({ id, name, status }) => ({ id, name, status })) : []
+      this.send(socket, { type: 'presence', total: guests.length, waitingCount, countsByRoom: counts, members })
     })
+  }
+
+  private sendPoll(room: string) {
+    const poll = this.polls.get(room)
+    if (!poll) return
+    for (const socket of this.sockets()) {
+      const guest = this.guest(socket)
+      if (guest.room !== room) continue
+      const { room: _room, voters, ...publicPoll } = poll
+      this.send(socket, { type: 'poll', poll: { ...publicPoll, myVote: voters[guest.id] } })
+    }
+  }
+
+  private sendGame(room: string) {
+    const game = this.games.get(room)
+    if (!game) return
+    for (const socket of this.sockets()) {
+      const guest = this.guest(socket)
+      if (guest.room !== room) continue
+      const { room: _room, players, ...publicGame } = game
+      this.send(socket, { type: 'game', game: { ...publicGame, players: Object.values(players), joined: Boolean(players[guest.id]) } })
+    }
   }
 
   private line(room: string, text: string, from?: Member, style?: ChatStyle, image?: string) {
@@ -121,7 +147,7 @@ export class Chat extends DurableObject<Env> {
     const guest = this.guest(socket)
     const value = typeof event.value === 'string' ? event.value.trim() : ''
     const now = Date.now()
-    if ((event.action === 'say' || event.action === 'image') && now - guest.last < 600) {
+    if ((event.action === 'say' || event.action === 'whisper' || event.action === 'image') && now - guest.last < 600) {
       this.send(socket, { type: 'notice', text: '잠시 후 다시 시도해 주세요.' })
       return
     }
@@ -142,13 +168,20 @@ export class Chat extends DurableObject<Env> {
         if (guest.room && oldName !== value) this.line(guest.room, `${oldName}님이 ${value}으로 닉네임을 변경했습니다.`)
         this.presence()
         return
+      case 'status':
+        if (value !== 'chatting' && value !== 'away') return
+        guest.status = value
+        this.save(socket, guest)
+        break
       case 'join':
         if (!rooms.some(room => room.id === value)) return
         this.leave(socket, guest)
         guest.room = value
         this.save(socket, guest)
         this.send(socket, { type: 'room', room: value })
-        this.line(value, guest.name + '님이 입장했습니다.')
+        this.line(value, `${guest.name}님이 입장했습니다. 반가워요! 오늘의 아재개그도 함께 봐요.`)
+        this.sendPoll(value)
+        this.sendGame(value)
         break
       case 'queue':
         if (guest.queued) return
@@ -178,6 +211,113 @@ export class Chat extends DurableObject<Env> {
         this.save(socket, guest)
         this.line(guest.room, value.replace(/[\r\n]+/g, ' '), { id: guest.id, name: guest.name }, style)
         return
+      case 'pollCreate': {
+        if (!guest.room || guest.room.startsWith('pair:')) return
+        const current = this.polls.get(guest.room)
+        if (current && !current.closed) {
+          this.send(socket, { type: 'notice', text: '이 방에서 진행 중인 투표가 이미 있습니다.' })
+          return
+        }
+        let parsed: { question?: unknown; options?: unknown }
+        try { parsed = JSON.parse(value) } catch { return }
+        const question = typeof parsed.question === 'string' ? parsed.question.trim() : ''
+        const options = Array.isArray(parsed.options) ? parsed.options.filter((option): option is string => typeof option === 'string').map(option => option.trim()).filter(Boolean) : []
+        if (question.length < 2 || question.length > 80 || options.length < 2 || options.length > 4 || options.some(option => option.length > 32)) {
+          this.send(socket, { type: 'notice', text: '투표 질문과 선택지를 확인해 주세요. (선택지 2~4개)' })
+          return
+        }
+        const poll: PollData = { id: crypto.randomUUID(), room: guest.room, question, options: options.map(text => ({ id: crypto.randomUUID(), text, votes: 0 })), owner: { id: guest.id, name: guest.name }, voters: {}, closed: false }
+        this.polls.set(guest.room, poll)
+        this.sendPoll(guest.room)
+        this.line(guest.room, `${guest.name}님이 투표를 열었습니다.`)
+        return
+      }
+      case 'pollVote': {
+        const poll = this.polls.get(guest.room)
+        if (!poll || poll.closed || poll.id !== event.target) return
+        const option = poll.options.find(item => item.id === value)
+        if (!option) return
+        const previous = poll.voters[guest.id]
+        if (previous === value) return
+        if (previous) {
+          const previousOption = poll.options.find(item => item.id === previous)
+          if (previousOption) previousOption.votes = Math.max(0, previousOption.votes - 1)
+        }
+        option.votes += 1
+        poll.voters[guest.id] = value
+        this.sendPoll(guest.room)
+        return
+      }
+      case 'pollClose': {
+        const poll = this.polls.get(guest.room)
+        if (!poll || poll.closed || poll.id !== event.target || poll.owner.id !== guest.id) return
+        poll.closed = true
+        this.sendPoll(guest.room)
+        return
+      }
+      case 'gameCreate': {
+        if (!guest.room || guest.room.startsWith('pair:')) return
+        const current = this.games.get(guest.room)
+        if (current && !current.ended && current.endsAt > now) {
+          this.send(socket, { type: 'notice', text: '이 방에서 진행 중인 테트리스 라운드가 있습니다.' })
+          return
+        }
+        const game: GameData = { id: crypto.randomUUID(), room: guest.room, owner: { id: guest.id, name: guest.name }, endsAt: now + 120000, ended: false, players: { [guest.id]: { member: { id: guest.id, name: guest.name }, score: 0 } } }
+        this.games.set(guest.room, game)
+        this.sendGame(guest.room)
+        this.line(guest.room, `${guest.name}님이 테트리스 한 판을 시작했어요! (2분 친선 라운드)`)
+        return
+      }
+      case 'gameJoin': {
+        const game = this.games.get(guest.room)
+        if (!game || game.ended || game.endsAt <= now || game.id !== event.target) return
+        game.players[guest.id] ??= { member: { id: guest.id, name: guest.name }, score: 0 }
+        this.sendGame(guest.room)
+        return
+      }
+      case 'gameScore': {
+        const game = this.games.get(guest.room)
+        if (!game || game.id !== event.target || !game.players[guest.id]) return
+        if (game.endsAt <= now) {
+          game.ended = true
+          this.sendGame(guest.room)
+          return
+        }
+        const score = Number(value)
+        if (!Number.isFinite(score) || score < 0 || score > 999999) return
+        game.players[guest.id].score = Math.max(game.players[guest.id].score, Math.floor(score))
+        this.sendGame(guest.room)
+        return
+      }
+      case 'whisper': {
+        if (!guest.room || guest.room.startsWith('pair:') || !event.target || event.target === guest.id || !value || value.length > 400) return
+        const recipient = this.sockets().find(other => {
+          const peer = this.guest(other)
+          return peer.id === event.target && peer.room === guest.room
+        })
+        if (!recipient) {
+          this.send(socket, { type: 'notice', text: '상대가 채팅방을 나갔습니다. 접속자 목록에서 다시 선택해 주세요.' })
+          return
+        }
+        const proposed = event.style
+        const style: ChatStyle = {
+          font: ['Nanum Gothic', 'Nanum Myeongjo', 'Nanum Pen Script', 'Verdana', 'Gulim', 'Georgia', 'Courier New'].includes(proposed?.font ?? '') ? proposed!.font! : 'Nanum Gothic',
+          size: [12, 14, 16, 18].includes(proposed?.size ?? 0) ? proposed!.size! : 14,
+          color: ['#222222', '#c22552', '#205a9e', '#287744', '#713ca1'].includes(proposed?.color ?? '') ? proposed!.color! : '#222222',
+          bold: proposed?.bold === true,
+          italic: proposed?.italic === true,
+          underline: proposed?.underline === true,
+        }
+        const peer = this.guest(recipient)
+        guest.last = now
+        this.save(socket, guest)
+        const line: Line = { id: crypto.randomUUID(), at: now, text: value.replace(/[\r\n]+/g, ' '), from: { id: guest.id, name: guest.name }, whisperTo: { id: peer.id, name: peer.name }, style }
+        this.evidence.push({ room: guest.room, line })
+        if (this.evidence.length > 400) this.evidence.shift()
+        this.send(socket, { type: 'line', line })
+        this.send(recipient, { type: 'line', line })
+        return
+      }
       case 'image':
         if (!guest.room || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length > 120000) return
         if (guest.room.startsWith('pair:') && !this.sockets().some(other => other !== socket && this.guest(other).room === guest.room)) return
@@ -186,7 +326,7 @@ export class Chat extends DurableObject<Env> {
         this.line(guest.room, '[이미지]', { id: guest.id, name: guest.name }, undefined, value)
         return
       case 'report': {
-        const message = this.evidence.find(item => item.room === guest.room && item.line.id === event.target && item.line.from?.id !== guest.id)?.line
+        const message = this.evidence.find(item => item.room === guest.room && item.line.id === event.target && item.line.from?.id !== guest.id && (!item.line.whisperTo || item.line.whisperTo.id === guest.id))?.line
         if (!message?.from || !value || value.length > 200) {
           this.send(socket, { type: 'notice', text: '신고할 수 있는 최근 메시지가 아닙니다.' })
           return

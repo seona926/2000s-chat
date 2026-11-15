@@ -9,6 +9,10 @@ export const rooms = [
   { id: 'travel', group: '주제별', name: '여행·맛집', about: '다녀온 곳과 가보고 싶은 곳' },
   { id: 'hobby', group: '주제별', name: '게임·취미', about: '요즘 즐기는 것들' },
 ]
-export type Member = { id: string; name: string }
+export type Member = { id: string; name: string; status?: 'chatting' | 'away' }
 export type ChatStyle = { font: string; size: number; color: string; bold: boolean; italic: boolean; underline: boolean }
-export type Line = { id: string; at: number; text: string; from?: Member; style?: ChatStyle; image?: string }
+export type Line = { id: string; at: number; text: string; from?: Member; whisperTo?: Member; style?: ChatStyle; image?: string }
+export type PollOption = { id: string; text: string; votes: number }
+export type RoomPoll = { id: string; question: string; options: PollOption[]; owner: Member; closed: boolean; myVote?: string }
+export type GamePlayer = { member: Member; score: number }
+export type GameRound = { id: string; owner: Member; endsAt: number; ended: boolean; players: GamePlayer[]; joined?: boolean }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
-import { rooms, type ChatStyle, type Line, type Member } from './rooms'
+import { rooms, type ChatStyle, type GameRound, type Line, type Member, type RoomPoll } from './rooms'
+import { TetrisBoard } from './tetris'
 import './style.css'
 
 type ChatEvent = {
@@ -9,14 +10,74 @@ type ChatEvent = {
   name?: string
   room?: string
   line?: Line
-  counts?: Record<string, number>
+  countsByRoom?: Record<string, number>
   total?: number
   waitingCount?: number
   members?: Member[]
+  poll?: RoomPoll
+  game?: GameRound
   text?: string
 }
 
 const nameColors = ['#a02050', '#205a9e', '#287744', '#713ca1', '#a35818', '#137d85', '#9b3277', '#514fa5']
+const dailyJokes = [
+  { question: '세상에서 가장 뜨거운 바다는?', answer: '열바다!' },
+  { question: '왕이 넘어지면?', answer: '킹콩!' },
+  { question: '자동차가 놀라면?', answer: '카놀라유!' },
+  { question: '소가 웃으면?', answer: '우하하!' },
+  { question: '세상에서 가장 억울한 도형은?', answer: '원통해!' },
+  { question: '오리가 얼면?', answer: '언덕!' },
+  { question: '신이 버스에서 내리면?', answer: '신내림!' },
+  { question: '세상에서 가장 쉬운 숫자는?', answer: '190,000 (십구만)!' },
+  { question: '딸기가 회사에서 잘리면?', answer: '딸기시럽!' },
+  { question: '세상에서 가장 지루한 중학교는?', answer: '로딩중!' },
+  { question: '바나나가 웃으면?', answer: '바나나킥!' },
+  { question: '세상에서 가장 급한 떡은?', answer: '헐레벌떡!' },
+  { question: '아몬드가 죽으면?', answer: '다이아몬드!' },
+  { question: '깨가 죽으면?', answer: '주근깨!' },
+  { question: '세상에서 가장 뜨거운 전화는?', answer: '화상전화!' },
+  { question: '세상에서 가장 큰 코는?', answer: '멕시코!' },
+  { question: '세상에서 가장 차가운 전쟁은?', answer: '빙하전쟁!' },
+  { question: '세상에서 가장 뜨거운 과일은?', answer: '천도복숭아!' },
+  { question: '세상에서 가장 잘 자는 곤충은?', answer: '잠자리!' },
+  { question: '세상에서 가장 뜨거운 개는?', answer: '핫도그!' },
+  { question: '세상에서 가장 뜨거운 복숭아는?', answer: '천도복숭아!' },
+  { question: '세상에서 가장 가난한 왕은?', answer: '최저임금!' },
+  { question: '세상에서 가장 뜨거운 국은?', answer: '천국!' },
+  { question: '세상에서 가장 착한 사자는?', answer: '자원봉사자!' },
+  { question: '세상에서 가장 뜨거운 바람은?', answer: '열바람!' },
+  { question: '소가 계단을 오르면?', answer: '소오름!' },
+  { question: '세상에서 가장 뜨거운 전화는?', answer: '불통!' },
+  { question: '세상에서 가장 뜨거운 산은?', answer: '화산!' },
+  { question: '세상에서 가장 큰 문은?', answer: '대문!' },
+  { question: '세상에서 가장 긴 음식은?', answer: '참기름!' },
+  { question: '세상에서 가장 빠른 닭은?', answer: '후다닥!' },
+  { question: '세상에서 가장 뜨거운 바지는?', answer: '핫팬츠!' },
+  { question: '세상에서 가장 뜨거운 고추는?', answer: '불고추!' },
+  { question: '세상에서 가장 뜨거운 강은?', answer: '열강!' },
+  { question: '세상에서 가장 뜨거운 춤은?', answer: '불춤!' },
+  { question: '세상에서 가장 뜨거운 책은?', answer: '불타는 책!' },
+  { question: '세상에서 가장 뜨거운 아이스크림은?', answer: '불타는 아이스크림!' },
+  { question: '세상에서 가장 뜨거운 모자는?', answer: '불모자!' },
+  { question: '세상에서 가장 뜨거운 학교는?', answer: '열학교!' },
+  { question: '세상에서 가장 뜨거운 옷은?', answer: '불옷!' },
+  { question: '세상에서 가장 뜨거운 물고기는?', answer: '열대어!' },
+  { question: '세상에서 가장 뜨거운 차는?', answer: '열차!' },
+  { question: '세상에서 가장 뜨거운 문은?', answer: '화문!' },
+  { question: '세상에서 가장 뜨거운 마음은?', answer: '열정!' },
+  { question: '세상에서 가장 뜨거운 사진은?', answer: '화보!' },
+  { question: '세상에서 가장 뜨거운 방은?', answer: '찜질방!' },
+  { question: '세상에서 가장 뜨거운 손은?', answer: '불손!' },
+  { question: '세상에서 가장 뜨거운 발은?', answer: '불발!' },
+  { question: '세상에서 가장 뜨거운 눈은?', answer: '불꽃눈!' },
+]
+
+function nextJokeIndex() {
+  const previous = storedSetting('jeopsokjung-last-joke', '')
+  const previousIndex = previous === '' ? -1 : Number(previous)
+  const choices = dailyJokes.map((_, index) => index).filter(index => index !== previousIndex)
+  return choices[Math.floor(Math.random() * choices.length)]
+}
 
 function nameColor(memberId: string) {
   let hash = 0
@@ -24,11 +85,17 @@ function nameColor(memberId: string) {
   return nameColors[hash % nameColors.length]
 }
 
+function storedSetting(key: string, fallback: string) {
+  try { return localStorage.getItem(key) ?? fallback } catch { return fallback }
+}
+
 function App() {
   const socket = useRef<WebSocket | null>(null)
   const log = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
   const upload = useRef<HTMLInputElement>(null)
+  const audioContext = useRef<AudioContext | null>(null)
+  const soundEnabledRef = useRef(false)
   const publicRoom = useRef('')
   const wasConnected = useRef(false)
   const lastContentSent = useRef(0)
@@ -42,19 +109,58 @@ function App() {
   const [total, setTotal] = useState(0)
   const [waitingCount, setWaitingCount] = useState(0)
   const [members, setMembers] = useState<Member[]>([])
+  const [poll, setPoll] = useState<RoomPoll | null>(null)
+  const [gameRound, setGameRound] = useState<GameRound | null>(null)
+  const [activeTab, setActiveTab] = useState<'chat' | 'game'>('chat')
   const [lines, setLines] = useState<Line[]>([])
   const [hidden, setHidden] = useState<string[]>([])
   const [message, setMessage] = useState('')
+  const [whisperToId, setWhisperToId] = useState('')
+  const [chatBackground, setChatBackground] = useState(() => storedSetting('jeopsokjung-chat-background', 'paper'))
+  const [soundEnabled, setSoundEnabled] = useState(() => storedSetting('jeopsokjung-chat-sounds', 'off') === 'on')
+  const [dailyJokeIndex] = useState(nextJokeIndex)
   const [style, setStyle] = useState<ChatStyle>({ font: 'Nanum Gothic', size: 16, color: '#222222', bold: false, italic: false, underline: false })
   const [emojis, setEmojis] = useState(false)
   const [showFormatting, setShowFormatting] = useState(false)
   const [notice, setNotice] = useState('')
   const [showMembers, setShowMembers] = useState(false)
-  const [dialog, setDialog] = useState<'help' | 'nick' | 'report' | null>(null)
+  const [dialog, setDialog] = useState<'help' | 'nick' | 'report' | 'poll' | null>(null)
   const [target, setTarget] = useState<Line | null>(null)
   const [draft, setDraft] = useState('')
+  const [pollQuestion, setPollQuestion] = useState('')
+  const [pollOptions, setPollOptions] = useState(['', ''])
   const [nickError, setNickError] = useState('')
   const modal = useRef<HTMLDialogElement>(null)
+
+  function playRoomSound() {
+    if (!soundEnabledRef.current || !audioContext.current) return
+    const context = audioContext.current
+    const oscillator = context.createOscillator()
+    const volume = context.createGain()
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(740, context.currentTime)
+    oscillator.frequency.exponentialRampToValueAtTime(520, context.currentTime + 0.09)
+    volume.gain.setValueAtTime(0.0001, context.currentTime)
+    volume.gain.exponentialRampToValueAtTime(0.035, context.currentTime + 0.015)
+    volume.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.12)
+    oscillator.connect(volume)
+    volume.connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.13)
+  }
+
+  function toggleSounds() {
+    setSoundEnabled(enabled => {
+      const next = !enabled
+      soundEnabledRef.current = next
+      try { localStorage.setItem('jeopsokjung-chat-sounds', next ? 'on' : 'off') } catch { /* The setting remains active for this visit. */ }
+      if (next && typeof window !== 'undefined' && window.AudioContext) {
+        audioContext.current ??= new AudioContext()
+        void audioContext.current.resume()
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     let stopped = false
@@ -84,11 +190,13 @@ function App() {
             break
           case 'nickError': setNickError(event.text ?? '닉네임을 변경하지 못했습니다.'); break
           case 'presence':
-            setCounts(event.counts ?? {})
+            setCounts(event.countsByRoom ?? {})
             setTotal(event.total ?? 0)
             setWaitingCount(event.waitingCount ?? 0)
             setMembers(event.members ?? [])
             break
+          case 'poll': setPoll(event.poll ?? null); break
+          case 'game': setGameRound(event.game ?? null); break
           case 'room':
             publicRoom.current = event.room?.startsWith('pair:') ? '' : event.room ?? ''
             setRoom(event.room ?? '')
@@ -96,6 +204,10 @@ function App() {
             setEnded(false)
             setLines([])
             setMessage('')
+            setWhisperToId('')
+            setPoll(null)
+            setGameRound(null)
+            setActiveTab('chat')
             setShowMembers(false)
             setNotice('')
             break
@@ -109,6 +221,7 @@ function App() {
           case 'line':
             if (event.line) {
               const line = event.line
+              if (!line.from && /님이 (입장했습니다|나갔습니다)/.test(line.text)) playRoomSound()
               setLines(previous => [...previous.slice(-199), line])
             }
             break
@@ -137,6 +250,12 @@ function App() {
     if (!dialog && modal.current?.open) modal.current.close()
   }, [dialog])
 
+  useEffect(() => { soundEnabledRef.current = soundEnabled }, [soundEnabled])
+
+  useEffect(() => {
+    try { localStorage.setItem('jeopsokjung-last-joke', String(dailyJokeIndex)) } catch { /* Rotation remains active for this visit. */ }
+  }, [dailyJokeIndex])
+
   useEffect(() => {
     if (log.current) log.current.scrollTop = log.current.scrollHeight
   }, [lines, room, hidden])
@@ -163,7 +282,17 @@ function App() {
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (message.trim() && send('say', message, undefined, style)) setMessage('')
+    if (!message.trim()) return
+    if (whisperToId) {
+      if (!members.some(member => member.id === whisperToId)) {
+        setNotice('수신자가 채팅방에 없습니다. 접속자 목록에서 다시 선택해 주세요.')
+        setWhisperToId('')
+        return
+      }
+      if (send('whisper', message, whisperToId, style)) setMessage('')
+      return
+    }
+    if (send('say', message, undefined, style)) setMessage('')
   }
 
   async function sendImage(file?: File) {
@@ -193,16 +322,22 @@ function App() {
     }
   }
 
-  function openDialog(kind: 'help' | 'nick' | 'report', line?: Line) {
+  function openDialog(kind: 'help' | 'nick' | 'report' | 'poll', line?: Line) {
     setTarget(line ?? null)
     setDraft(kind === 'nick' ? name : '')
+    if (kind === 'poll') { setPollQuestion(''); setPollOptions(['', '']) }
     setNickError('')
     setDialog(kind)
   }
 
   function submitDialog(event: FormEvent) {
     event.preventDefault()
-    const done = dialog === 'nick' ? send('nick', draft) : send('report', draft, target?.id)
+    if (dialog === 'poll') {
+      const options = pollOptions.map(option => option.trim()).filter(Boolean)
+      if (send('pollCreate', JSON.stringify({ question: pollQuestion.trim(), options }))) setDialog(null)
+      return
+    }
+    const done = dialog === 'nick' ? send('nick', draft) : dialog === 'report' ? send('report', draft, target?.id) : false
     if (done && dialog !== 'nick') setDialog(null)
   }
 
@@ -219,6 +354,7 @@ function App() {
 
   const pair = room.startsWith('pair:')
   const current = rooms.find(item => item.id === room)
+  const whisperRecipient = members.find(member => member.id === whisperToId)
   const activeRooms = rooms.filter(item => (counts[item.id] ?? 0) > 0).sort((a, b) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0))
   const previewStyle = {
     color: style.color,
@@ -229,6 +365,7 @@ function App() {
     textDecoration: style.underline ? 'underline' : 'none',
   }
   const time = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+  const dailyJoke = dailyJokes[dailyJokeIndex]
 
   return (
     <div className={'site' + (room ? ' in-room' : '')}>
@@ -256,30 +393,50 @@ function App() {
             {roomList(rooms.filter(item => item.group === group))}
           </section>)}
         </div>
-      </> : <section className="window panel" aria-label="채팅방">
+      </> : <section className={'window panel chat-bg-' + chatBackground} aria-label="채팅방">
         <div className="bar chat-title"><h1>{pair ? '랜덤 1:1 채팅' : current?.name}</h1><button className="classic" onClick={() => send('leave')}>← 로비로</button></div>
         <div className="chat-menu"><span>{pair ? ended ? '대화 종료' : '상대와 연결됨' : current?.about}</span>
-          <div className="chat-actions"><button className="link" onClick={() => openDialog('nick')}>닉네임 변경</button>
+          <div className="chat-actions"><label className="status-control">내 상태 <select aria-label="내 접속 상태" value={members.find(member => member.id === id)?.status ?? 'chatting'} onChange={event => send('status', event.target.value)}><option value="chatting">수다 중</option><option value="away">자리 비움</option></select></label><button className="link" onClick={() => openDialog('nick')}>닉네임 변경</button>
           {pair && <button className="link" onClick={() => send('queue')}>다음 상대</button>}
           {!pair && <button className="link member-toggle" aria-expanded={showMembers} onClick={() => setShowMembers(!showMembers)}>접속자 {members.length}명</button>}</div>
         </div>
+        {!pair && <div className="room-tools"><button className="tool-button" disabled={Boolean(poll && !poll.closed)} onClick={() => openDialog('poll')}>🗳️ 투표 만들기</button><button className={'tool-button' + (activeTab === 'game' ? ' selected' : '')} aria-current={activeTab === 'game' ? 'page' : undefined} onClick={() => setActiveTab(activeTab === 'game' ? 'chat' : 'game')}>🎮 테트리스{gameRound && !gameRound.ended ? ' · 진행 중' : ''}</button></div>}
+        {!pair && <div className="daily-phrase"><strong>오늘의 아재개그</strong><span><b>Q.</b> {dailyJoke.question} <b>A.</b> {dailyJoke.answer}</span></div>}
         <div className="workspace">
-          <div className="log" ref={log} role="log" aria-label="대화 로그" tabIndex={0}>
+          <div className="log" ref={log} role="log" aria-label="대화 로그" tabIndex={0} hidden={activeTab === 'game'}>
+            {poll && <section className={'poll-panel' + (poll.closed ? ' is-closed' : '')} aria-label="방 투표">
+              <div className="poll-heading"><h2>{poll.question}</h2><span>{poll.closed ? '종료된 투표' : '진행 중 투표'}</span></div>
+              <div className="poll-options">{poll.options.map(option => {
+                const totalVotes = poll.options.reduce((sum, item) => sum + item.votes, 0)
+                const percent = totalVotes ? Math.round(option.votes * 100 / totalVotes) : 0
+                return <button key={option.id} className={'poll-option' + (poll.myVote === option.id ? ' is-selected' : '')} disabled={poll.closed} onClick={() => send('pollVote', option.id, poll.id)}>
+                  <span className="poll-option-label">{option.text}<b>{option.votes}표 · {percent}%</b></span><i style={{ width: percent + '%' }} />
+                </button>
+              })}</div>
+              <div className="poll-footer"><span>{poll.myVote ? '선택을 눌러 표를 변경할 수 있어요.' : poll.closed ? '투표가 종료되었습니다.' : '원하는 항목에 투표해 주세요.'}</span>{id === poll.owner.id && !poll.closed && <button className="link" onClick={() => send('pollClose', '', poll.id)}>투표 마감</button>}</div>
+            </section>}
+            {!lines.length && !ended && <div className="empty-chat"><span aria-hidden="true">｡･:*:･ﾟ★</span><strong>아직 대화가 없어요</strong><p>오늘의 아재개그로 가볍게 웃으며 시작해 보세요.</p></div>}
             {lines.filter(line => !line.from || !hidden.includes(line.from.id)).map(line =>
-              <div className={line.from ? 'chat-line' : 'chat-line system'} key={line.id}>
+              <div className={line.from ? 'chat-line' + (line.whisperTo ? ' whisper-line' : '') : 'chat-line system'} key={line.id}>
                 <time dateTime={new Date(line.at).toISOString()}>[{time.format(line.at)}]</time>
-                <div>{line.from && <b style={{ color: nameColor(line.from.id) }}>{line.from.name}: </b>}{line.image ? <img className="chat-image" src={line.image} alt="채팅으로 보낸 이미지" /> : <span style={line.style ? { color: line.style.color, fontFamily: line.style.font, fontSize: line.style.font === 'Nanum Pen Script' ? line.style.size * 1.25 : line.style.size, fontWeight: line.style.bold ? 'bold' : 'normal', fontStyle: line.style.italic ? 'italic' : 'normal', textDecoration: line.style.underline ? 'underline' : 'none' } : undefined}>{line.text}</span>}</div>
+                <div>{line.from && <b style={{ color: nameColor(line.from.id) }}>{line.whisperTo ? line.from.id === id ? `귓속말 → ${line.whisperTo.name}: ` : `귓속말 ← ${line.from.name}: ` : `${line.from.name}: `}</b>}{line.image ? <img className="chat-image" src={line.image} alt="채팅으로 보낸 이미지" /> : <span style={line.style ? { color: line.style.color, fontFamily: line.style.font, fontSize: line.style.font === 'Nanum Pen Script' ? line.style.size * 1.25 : line.style.size, fontWeight: line.style.bold ? 'bold' : 'normal', fontStyle: line.style.italic ? 'italic' : 'normal', textDecoration: line.style.underline ? 'underline' : 'none' } : undefined}>{line.text}</span>}
+                </div>
                 {line.from && line.from.id !== id && <button className="link report" aria-label={line.from.name + ' 메시지 신고'} onClick={() => openDialog('report', line)}>신고</button>}
               </div>
             )}
             {ended && <p className="ended" role="status">상대가 대화를 종료했습니다.</p>}
           </div>
+          <TetrisBoard round={gameRound} active={activeTab === 'game'} onCreate={() => { setActiveTab('game'); send('gameCreate') }} onJoin={roundId => send('gameJoin', '', roundId)} onScore={(roundId, score) => send('gameScore', String(score), roundId)} />
           {!pair && <aside className={'members' + (showMembers ? ' expanded' : '')}>
             <h2>☺ 접속자 {members.length}명</h2>
-            <ul>{members.map(member => <li key={member.id}>{member.id === id
-              ? <button className="link member-self" title="닉네임 변경" onClick={() => openDialog('nick')}>{member.name} (나)</button>
-              : <span title={member.name}>{member.name}</span>}
-              {member.id !== id && <button className="link" onClick={() => setHidden(previous => previous.includes(member.id) ? previous.filter(item => item !== member.id) : [...previous, member.id])}>{hidden.includes(member.id) ? '숨기기 해제' : '숨기기'}</button>}
+            <ul>{members.map(member => <li key={member.id}>
+              {member.id === id
+                ? <button className="link member-self" title="닉네임 변경" onClick={() => openDialog('nick')}>{member.name} (나)</button>
+                : <button className="link member-name" title={member.name + '에게 귓속말 수신자로 지정'} aria-pressed={whisperToId === member.id} onClick={() => { setWhisperToId(current => current === member.id ? '' : member.id); input.current?.focus() }}>{member.name}</button>}
+              <div className="member-row-actions">
+                <span className={'member-status' + (member.status === 'away' ? ' away' : '')} title={member.status === 'away' ? '자리 비움' : '수다 중'}><i aria-hidden="true" />{member.status === 'away' ? '자리 비움' : '수다 중'}</span>
+              {member.id !== id && <button className="link member-action" onClick={() => setHidden(previous => previous.includes(member.id) ? previous.filter(item => item !== member.id) : [...previous, member.id])}>{hidden.includes(member.id) ? '숨기기 해제' : '숨기기'}</button>}
+              </div>
             </li>)}</ul>
           </aside>}
         </div>
@@ -287,6 +444,8 @@ function App() {
         <div className="format-row" aria-label="메시지 꾸미기">
           <button type="button" className="tool-button" aria-expanded={emojis} onClick={() => setEmojis(!emojis)}>☺ 이모지</button>
           <button type="button" className="tool-button" onClick={() => upload.current?.click()}>▧ 이미지</button>
+          <label className="background-picker">배경 <select aria-label="채팅방 배경" value={chatBackground} onChange={event => { setChatBackground(event.target.value); try { localStorage.setItem('jeopsokjung-chat-background', event.target.value) } catch { /* The setting remains active for this visit. */ } }}><option value="paper">종이</option><option value="sky">하늘</option><option value="rose">분홍</option><option value="mint">민트</option></select></label>
+          <button type="button" className="tool-button sound-toggle" aria-pressed={soundEnabled} onClick={toggleSounds}>♫ 효과음 {soundEnabled ? '켬' : '끔'}</button>
           <input ref={upload} className="file-input" type="file" accept="image/*" aria-label="이미지 선택" onChange={event => void sendImage(event.target.files?.[0])} />
           <button type="button" className="tool-button format-panel-toggle" aria-expanded={showFormatting} aria-controls="format-controls" onClick={() => setShowFormatting(!showFormatting)}>Aa 글자 꾸미기 {showFormatting ? '▴' : '▾'}</button>
           <div id="format-controls" className={'format-controls' + (showFormatting ? ' expanded' : '')}>
@@ -301,20 +460,29 @@ function App() {
           </div>
         </div>
         {emojis && <div className="emoji-picker">{['😀','😂','🥹','😍','😎','😭','😡','👍','👏','❤️','💐','🐱','✨','🎉','☕','🍰'].map(emoji => <button type="button" key={emoji} onClick={() => { setMessage(previous => previous + emoji); setEmojis(false); input.current?.focus() }}>{emoji}</button>)}</div>}
+        {!pair && <div className={'whisper-target' + (whisperRecipient ? ' is-active' : '')}>
+          <label htmlFor="whisper-recipient">귓속말</label>
+          <select id="whisper-recipient" value={whisperToId} disabled={ended} onChange={event => setWhisperToId(event.target.value)}>
+            <option value="">전체 대화방</option>
+            {members.filter(member => member.id !== id).map(member => <option key={member.id} value={member.id}>{member.name}에게</option>)}
+          </select>
+          {whisperRecipient && <><span className="whisper-confirm">{whisperRecipient.name}님만 받습니다</span><button type="button" className="link" onClick={() => setWhisperToId('')}>해제</button></>}
+        </div>}
         <form className="compose" onSubmit={submit}>
-          <input ref={input} aria-label="메시지" style={previewStyle} value={message} maxLength={400} disabled={ended} onChange={event => setMessage(event.target.value)} placeholder={ended ? '다음 상대를 찾거나 로비로 돌아가세요.' : '메시지를 입력하세요'} />
-          <button className="classic primary" disabled={ended || !message.trim()}>전송</button>
+          <input ref={input} aria-label={whisperRecipient ? whisperRecipient.name + '에게 보낼 귓속말' : '메시지'} style={previewStyle} value={message} maxLength={400} disabled={ended} onChange={event => setMessage(event.target.value)} placeholder={ended ? '다음 상대를 찾거나 로비로 돌아가세요.' : whisperRecipient ? whisperRecipient.name + '님에게 귓속말을 입력하세요' : '메시지를 입력하세요'} />
+          <button className="classic primary" disabled={ended || !message.trim()}>{whisperRecipient ? '귓속말 보내기' : '전송'}</button>
         </form>
         <div className="status-bar"><span>접속중! Chat</span><span>{online ? '● 연결됨' : '○ 연결 중'}</span><span>온라인 {total}명</span></div>
       </section>}
       </main>
       <dialog ref={modal} onClose={() => setDialog(null)}>
-        <div className="bar dialog-title">{dialog === 'nick' ? '닉네임 변경' : dialog === 'report' ? '메시지 신고' : '이용 안내'}</div>
+        <div className="bar dialog-title">{dialog === 'nick' ? '닉네임 변경' : dialog === 'report' ? '메시지 신고' : dialog === 'poll' ? '새 투표 만들기' : '이용 안내'}</div>
         <form onSubmit={submitDialog}>
           {dialog === 'nick' && <><label>닉네임 <input autoFocus required minLength={2} maxLength={16} value={draft} onChange={event => { setDraft(event.target.value); setNickError('') }} /></label>{nickError && <p className="dialog-error" role="alert">{nickError}</p>}</>}
           {dialog === 'report' && <><blockquote>{target?.text}</blockquote><label>신고 사유 <textarea autoFocus required maxLength={200} value={draft} onChange={event => setDraft(event.target.value)} /></label></>}
+          {dialog === 'poll' && <div className="poll-form"><label>질문 <input autoFocus required maxLength={80} value={pollQuestion} onChange={event => setPollQuestion(event.target.value)} placeholder="예: 오늘 점심 뭐 먹을까요?" /></label><fieldset><legend>선택지 (2~4개)</legend>{pollOptions.map((option, index) => <div className="poll-option-input" key={index}><input required={index < 2} maxLength={32} aria-label={`선택지 ${index + 1}`} value={option} onChange={event => setPollOptions(previous => previous.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={`선택지 ${index + 1}`} />{index > 1 && <button type="button" className="link" onClick={() => setPollOptions(previous => previous.filter((_, itemIndex) => itemIndex !== index))}>삭제</button>}</div>)}</fieldset>{pollOptions.length < 4 && <button type="button" className="link" onClick={() => setPollOptions(previous => [...previous, ''])}>+ 선택지 추가</button>}</div>}
           {dialog === 'help' && <p>닉네임으로 입장해 대화할 수 있습니다. 개인정보 공유, 괴롭힘, 도배는 삼가 주세요. 문제가 있는 메시지는 옆의 신고 버튼을 이용할 수 있습니다.</p>}
-          <div className="dialog-actions"><button type="button" className="classic" onClick={() => setDialog(null)}>{dialog === 'help' ? '닫기' : '취소'}</button>{dialog !== 'help' && <button className="classic primary">{dialog === 'report' ? '신고 접수' : '변경'}</button>}</div>
+          <div className="dialog-actions"><button type="button" className="classic" onClick={() => setDialog(null)}>{dialog === 'help' ? '닫기' : '취소'}</button>{dialog !== 'help' && <button className="classic primary">{dialog === 'report' ? '신고 접수' : dialog === 'poll' ? '투표 시작' : '변경'}</button>}</div>
         </form>
       </dialog>
     </div>
