@@ -1,0 +1,8 @@
+{
+  "name": "jeopsokjung",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-07-01",
+  "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": ["/socket"] },
+  "durable_objects": { "bindings": [{ "name": "CHAT", "class_name": "Chat" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Chat"] }]
+}
