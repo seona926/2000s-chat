@@ -2,8 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { rooms, type ChatStyle, type GameRound, type Line, type Member, type RoomPoll } from './rooms'
 
 type Env = { CHAT: DurableObjectNamespace<Chat>; ASSETS: Fetcher }
-type Guest = Member & { room: string; queued: number; last: number; lastReport: number; status: 'chatting' | 'away' }
-type Evidence = { room: string; line: Line }
+type Guest = Member & { room: string; queued: number; last: number; status: 'chatting' | 'away' }
 type PollData = Omit<RoomPoll, 'myVote'> & { room: string; voters: Record<string, string> }
 type GameData = Omit<GameRound, 'players' | 'joined'> & { room: string; players: Record<string, { member: Member; score: number }> }
 const nicknameKey = (name: string) => name.normalize('NFKC').toLocaleLowerCase('ko-KR').replace(/\s+/g, ' ')
@@ -19,21 +18,15 @@ export default {
 }
 
 export class Chat extends DurableObject<Env> {
-  private evidence: Evidence[] = []
   private polls = new Map<string, PollData>()
   private games = new Map<string, GameData>()
-
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env)
-    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS reports (id TEXT PRIMARY KEY, created_at INTEGER, reporter TEXT, target TEXT, reason TEXT, message TEXT)')
-  }
 
   fetch() {
     const [client, server] = Object.values(new WebSocketPair())
     const taken = new Set(this.sockets().map(socket => nicknameKey(this.guest(socket).name)))
     let name: string
     do { name = '손님' + (1000 + crypto.getRandomValues(new Uint16Array(1))[0] % 9000) } while (taken.has(nicknameKey(name)))
-    const guest = { id: crypto.randomUUID(), name, room: '', queued: 0, last: 0, lastReport: 0, status: 'chatting' as const }
+    const guest = { id: crypto.randomUUID(), name, room: '', queued: 0, last: 0, status: 'chatting' as const }
     this.ctx.acceptWebSocket(server)
     this.save(server, guest)
     this.send(server, { type: 'hello', id: guest.id, name: guest.name })
@@ -95,10 +88,6 @@ export class Chat extends DurableObject<Env> {
 
   private line(room: string, text: string, from?: Member, style?: ChatStyle, image?: string) {
     const line: Line = { id: crypto.randomUUID(), at: Date.now(), text, from, style, image }
-    if (from) {
-      this.evidence.push({ room, line: { ...line, image: undefined } })
-      if (this.evidence.length > 400) this.evidence.shift()
-    }
     for (const socket of this.sockets()) {
       if (this.guest(socket).room === room) this.send(socket, { type: 'line', line })
     }
@@ -115,7 +104,7 @@ export class Chat extends DurableObject<Env> {
       for (const other of this.sockets()) {
         const peer = this.guest(other)
         if (peer.room !== room) continue
-        // Retain the room until the peer leaves so they can report its last message.
+        // Let the remaining peer see that the conversation has ended.
         this.send(other, { type: 'ended' })
       }
     }
@@ -312,8 +301,6 @@ export class Chat extends DurableObject<Env> {
         guest.last = now
         this.save(socket, guest)
         const line: Line = { id: crypto.randomUUID(), at: now, text: value.replace(/[\r\n]+/g, ' '), from: { id: guest.id, name: guest.name }, whisperTo: { id: peer.id, name: peer.name }, style }
-        this.evidence.push({ room: guest.room, line })
-        if (this.evidence.length > 400) this.evidence.shift()
         this.send(socket, { type: 'line', line })
         this.send(recipient, { type: 'line', line })
         return
@@ -325,22 +312,6 @@ export class Chat extends DurableObject<Env> {
         this.save(socket, guest)
         this.line(guest.room, '[이미지]', { id: guest.id, name: guest.name }, undefined, value)
         return
-      case 'report': {
-        const message = this.evidence.find(item => item.room === guest.room && item.line.id === event.target && item.line.from?.id !== guest.id && (!item.line.whisperTo || item.line.whisperTo.id === guest.id))?.line
-        if (!message?.from || !value || value.length > 200) {
-          this.send(socket, { type: 'notice', text: '신고할 수 있는 최근 메시지가 아닙니다.' })
-          return
-        }
-        if (now - guest.lastReport < 30000) {
-          this.send(socket, { type: 'notice', text: '신고를 연속해서 접수할 수 없습니다. 잠시 후 다시 시도해 주세요.' })
-          return
-        }
-        this.ctx.storage.sql.exec('INSERT INTO reports VALUES (?, ?, ?, ?, ?, ?)', crypto.randomUUID(), now, guest.id, message.from.id, value, message.text)
-        guest.lastReport = now
-        this.save(socket, guest)
-        this.send(socket, { type: 'notice', text: '신고가 접수되었습니다.' })
-        return
-      }
       default: return
     }
     this.presence()
