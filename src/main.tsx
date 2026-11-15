@@ -361,6 +361,7 @@ function App() {
   }
 
   const pair = room.startsWith('pair:')
+  const pairPeer = pair ? members.find(member => member.id !== id) ?? lines.find(line => line.from && line.from.id !== id)?.from : undefined
   const current = rooms.find(item => item.id === room)
   const whisperRecipient = members.find(member => member.id === whisperToId && !blockedIds.includes(member.id))
   const activeRooms = rooms.filter(item => (counts[item.id] ?? 0) > 0).sort((a, b) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0))
@@ -417,8 +418,9 @@ function App() {
         </div>
       </> : <section className={'window panel chat-bg-' + chatBackground} aria-label="채팅방">
         <div className="bar chat-title"><h1>{pair ? '랜덤 1:1 채팅' : current?.name}</h1><button className="classic" onClick={() => send('leave')}>← 로비로</button></div>
-        <div className="chat-menu"><span>{pair ? ended ? '대화 종료' : '상대와 연결됨' : current?.about}</span>
+        <div className="chat-menu"><span>{pair ? ended ? '대화 종료' : pairPeer && blockedIds.includes(pairPeer.id) ? '상대 차단됨' : '상대와 연결됨' : current?.about}</span>
           <div className="chat-actions"><label className="status-control">내 상태 <select aria-label="내 접속 상태" value={members.find(member => member.id === id)?.status ?? 'chatting'} onChange={event => send('status', event.target.value)}><option value="chatting">수다 중</option><option value="away">자리 비움</option></select></label><button className="link" onClick={() => openDialog('nick')}>닉네임 변경</button>
+          {pairPeer && <button className="link" aria-pressed={blockedIds.includes(pairPeer.id)} aria-label={`${pairPeer.name} ${blockedIds.includes(pairPeer.id) ? '차단 해제' : '차단'}`} title="이 접속에서 내 화면에만 적용됩니다" onClick={() => toggleBlock(pairPeer.id)}>{blockedIds.includes(pairPeer.id) ? '차단 해제' : '상대 차단'}</button>}
           {pair && <button className="link" onClick={() => send('queue')}>다음 상대</button>}
           {!pair && <button className="link member-toggle" aria-expanded={showMembers} onClick={() => setShowMembers(!showMembers)}>접속자 {members.length}명</button>}</div>
         </div>
@@ -501,7 +503,7 @@ function App() {
         <form onSubmit={submitDialog}>
           {dialog === 'nick' && <><label>닉네임 <input autoFocus required minLength={2} maxLength={16} value={draft} onChange={event => { setDraft(event.target.value); setNickError('') }} /></label>{nickError && <p className="dialog-error" role="alert">{nickError}</p>}</>}
           {dialog === 'poll' && <div className="poll-form"><label>질문 <input autoFocus required maxLength={80} value={pollQuestion} onChange={event => setPollQuestion(event.target.value)} placeholder="예: 오늘 점심 뭐 먹을까요?" /></label><fieldset><legend>선택지 (2~4개)</legend>{pollOptions.map((option, index) => <div className="poll-option-input" key={index}><input required={index < 2} maxLength={32} aria-label={`선택지 ${index + 1}`} value={option} onChange={event => setPollOptions(previous => previous.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={`선택지 ${index + 1}`} />{index > 1 && <button type="button" className="link" onClick={() => setPollOptions(previous => previous.filter((_, itemIndex) => itemIndex !== index))}>삭제</button>}</div>)}</fieldset>{pollOptions.length < 4 && <button type="button" className="link" onClick={() => setPollOptions(previous => [...previous, ''])}>+ 선택지 추가</button>}</div>}
-          {dialog === 'help' && <p>닉네임으로 입장해 대화할 수 있습니다. 개인정보 공유, 괴롭힘, 도배는 삼가 주세요. 불편한 사용자는 접속자 목록에서 차단할 수 있습니다. 차단은 내 화면에서만 적용되며 상대가 재접속하면 새 사용자로 표시됩니다.</p>}
+          {dialog === 'help' && <p>닉네임으로 입장해 대화할 수 있습니다. 개인정보 공유, 괴롭힘, 도배는 삼가 주세요. 불편한 사용자는 공개방 접속자 목록이나 랜덤 1:1 상단에서 차단할 수 있습니다. 차단은 내 화면에서만 적용되며 상대가 재접속하면 새 사용자로 표시됩니다.</p>}
           <div className="dialog-actions"><button type="button" className="classic" onClick={() => setDialog(null)}>{dialog === 'help' ? '닫기' : '취소'}</button>{dialog !== 'help' && <button className="classic primary">{dialog === 'poll' ? '투표 시작' : '변경'}</button>}</div>
         </form>
       </dialog>
