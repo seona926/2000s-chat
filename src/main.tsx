@@ -381,20 +381,17 @@ function App() {
       </header>}
       <main>
       {!room ? <>
-        <nav className="portal-nav" aria-label="채팅방 바로가기">
-          <a href="#lobby-rooms">🏠 채팅방</a><a href="#lobby-random">🎲 랜덤수다</a><a href="#lobby-region">🌏 지역별</a><a href="#lobby-topic">💡 주제별</a>
-        </nav>
         <div className="portal-ticker"><b>접속중 알림</b><span>어서 오세요! 마음에 드는 방을 골라 자유롭게 이야기해 보세요.</span><span className="ticker-sparkle" aria-hidden="true">✦ ✦ ✦</span></div>
         <div className="lobby-grid">
         <aside className="lobby-side" aria-label="이용 정보">
-          <section className="portal-box"><h2>📌 바로가기</h2><button className="link" disabled={!online} onClick={() => send('join', 'free')}>자유채팅 입장하기</button><a href="#lobby-random">랜덤 1:1 시작하기</a><a href="#lobby-region">동네 채팅 둘러보기</a></section>
+          <section className="portal-box"><h2>📌 바로가기</h2><button className="link" disabled={!online} onClick={() => send('join', 'free')}>자유채팅 입장하기</button><button className="link" disabled={!online} onClick={() => send('queue')}>랜덤 1:1 시작하기</button></section>
           <section className="portal-box"><h2>💬 채팅 예절</h2><p>처음 만난 사람에게는 반갑게 인사해요!</p><button className="link" onClick={() => openDialog('help')}>이용 안내 보기 →</button></section>
         </aside>
-        <div className="lobby-center" id="lobby-rooms">
+        <div className="lobby-center">
         <div className="bar lobby-title"><h1>★ 채팅방 골라 들어가기</h1><span><i className={online ? 'online' : ''} />{online ? '접속 ' + total + '명' : '서버 연결 중'}</span></div>
         <div className="guest"><div>{name ? <><b>{name}</b>님, 어서 오세요.</> : '접속하는 중입니다.'}</div><button className="link" disabled={!online || waiting} onClick={() => openDialog('nick')}>닉네임 변경</button></div>
         {notice && <div className="notice" role="status">{notice}</div>}
-        <section className="random panel" id="lobby-random" aria-labelledby="random-title">
+        <section className="random panel" aria-labelledby="random-title">
           <div><h2 id="random-title">🎲 랜덤 1:1 채팅</h2><p role="status">{waiting ? `대기 중 ${waitingCount}명 · 다른 사람이 시작하면 자동으로 연결됩니다.` : `현재 대기 중 ${waitingCount}명 · 시작하면 자동으로 짝을 찾습니다.`}</p></div>
           <button className="classic primary" disabled={!online} onClick={() => send(waiting ? 'leave' : 'queue')}>{waiting ? '대기 취소' : '랜덤 1:1 시작'}</button>
           {waiting && <button className="link" onClick={() => send('join', 'free')}>자유채팅으로 이동</button>}
@@ -404,7 +401,7 @@ function App() {
           {activeRooms.length > 0 && !counts.free && <div className="active-foot"><button className="link" disabled={!online} onClick={() => send('join', 'free')}>빈 자유채팅방에 입장하기 →</button></div>}
         </section>
         <div className="directory">
-          {['지역별', '주제별'].map(group => <section className="panel" id={group === '지역별' ? 'lobby-region' : 'lobby-topic'} key={group}>
+          {['지역별', '주제별'].map(group => <section className="panel" key={group}>
             <div className="section-bar"><h2>{group === '지역별' ? '🌏' : '💡'} {group} 채팅</h2></div>
             {roomList(rooms.filter(item => item.group === group))}
           </section>)}
