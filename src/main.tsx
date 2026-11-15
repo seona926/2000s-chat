@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
-import { rooms, type ChatStyle, type GameRound, type Line, type Member, type RoomPoll } from './rooms'
+import { rooms, type ChatStyle, type GameRound, type Line, type Member, type MemberStatus, type RoomPoll } from './rooms'
 import { TetrisBoard } from './tetris'
 import { translateServerText, type Lang } from './i18n'
 import './style.css'
@@ -94,6 +94,18 @@ function nameColor(memberId: string) {
 
 function storedSetting(key: string, fallback: string) {
   try { return localStorage.getItem(key) ?? fallback } catch { return fallback }
+}
+
+const statusLabels: Record<MemberStatus, { ko: string; en: string; shortKo: string; shortEn: string }> = {
+  chatting: { ko: '수다 중', en: 'Chatting', shortKo: '수다 중', shortEn: 'Chat' },
+  away: { ko: '자리 비움', en: 'Away', shortKo: '자리 비움', shortEn: 'Away' },
+  gaming: { ko: '게임 중', en: 'Gaming', shortKo: '게임 중', shortEn: 'Gaming' },
+  busy: { ko: '잠시 바쁨', en: 'Busy', shortKo: '바쁨', shortEn: 'Busy' },
+}
+
+function statusLabel(status: MemberStatus, lang: Lang, compact = false) {
+  const labels = statusLabels[status]
+  return lang === 'en' ? compact ? labels.shortEn : labels.en : compact ? labels.shortKo : labels.ko
 }
 
 function initialLang(): Lang {
@@ -457,7 +469,7 @@ function App() {
       </> : <section className={'window panel chat-bg-' + chatBackground} aria-label={tr('채팅방', 'Chat room')}>
         <div className="bar chat-title"><h1>{pair ? tr('랜덤 1:1 채팅', 'Random 1:1 Chat') : en ? current?.nameEn : current?.name}</h1><div className="chat-title-actions"><div className="language-switch" role="group" aria-label={tr('언어 선택', 'Language')}><button type="button" aria-pressed={!en} onClick={() => chooseLang('ko')}>한국어</button><button type="button" aria-pressed={en} onClick={() => chooseLang('en')}>EN</button></div><button className="classic" onClick={() => send('leave')}>{tr('← 로비로', '← Lobby')}</button></div></div>
         <div className="chat-menu"><span>{pair ? ended ? tr('대화 종료', 'Chat ended') : pairPeer && blockedIds.includes(pairPeer.id) ? tr('상대 차단됨', 'Partner blocked') : tr('상대와 연결됨', 'Connected to a partner') : en ? current?.aboutEn : current?.about}</span>
-          <div className="chat-actions"><label className="status-control">{tr('내 상태', 'Status')} <select aria-label={tr('내 접속 상태', 'My status')} value={members.find(member => member.id === id)?.status ?? 'chatting'} onChange={event => send('status', event.target.value)}><option value="chatting">{tr('수다 중', 'Chatting')}</option><option value="away">{tr('자리 비움', 'Away')}</option></select></label><button className="link" onClick={() => openDialog('nick')}>{tr('닉네임 변경', 'Change name')}</button>
+          <div className="chat-actions"><label className="status-control">{tr('내 상태', 'Status')} <select aria-label={tr('내 접속 상태', 'My status')} value={members.find(member => member.id === id)?.status ?? 'chatting'} onChange={event => send('status', event.target.value)}>{(['chatting', 'away', 'gaming', 'busy'] as const).map(status => <option key={status} value={status}>{statusLabel(status, lang)}</option>)}</select></label><button className="link" onClick={() => openDialog('nick')}>{tr('닉네임 변경', 'Change name')}</button>
           {pairPeer && <button className="link" aria-pressed={blockedIds.includes(pairPeer.id)} aria-label={`${pairPeer.name} ${blockedIds.includes(pairPeer.id) ? tr('차단 해제', 'Unblock') : tr('차단', 'Block')}`} title={tr('이 접속에서 내 화면에만 적용됩니다', 'Only affects what you see during this visit')} onClick={() => toggleBlock(pairPeer.id)}>{blockedIds.includes(pairPeer.id) ? tr('차단 해제', 'Unblock') : tr('상대 차단', 'Block partner')}</button>}
           {pair && <button className="link" onClick={() => send('queue')}>{tr('다음 상대', 'Next partner')}</button>}
           {!pair && <button className="link member-toggle" aria-expanded={showMembers} onClick={() => setShowMembers(!showMembers)}>{en ? `${members.length} people` : `접속자 ${members.length}명`}</button>}</div>
@@ -495,7 +507,7 @@ function App() {
                 ? <button className="link member-self" title={tr('닉네임 변경', 'Change nickname')} onClick={() => openDialog('nick')}>{member.name} {tr('(나)', '(me)')}</button>
                 : <button className="link member-name" disabled={blockedIds.includes(member.id)} title={blockedIds.includes(member.id) ? tr('차단 해제 후 귓속말을 보낼 수 있습니다', 'Unblock to send a whisper') : en ? `Whisper to ${member.name}` : member.name + '에게 귓속말 수신자로 지정'} aria-pressed={whisperToId === member.id} onClick={() => { setWhisperToId(current => current === member.id ? '' : member.id); input.current?.focus() }}>{member.name}</button>}
               <div className="member-row-actions">
-                {!blockedIds.includes(member.id) && <span className={'member-status' + (member.status === 'away' ? ' away' : '')} title={member.status === 'away' ? tr('자리 비움', 'Away') : tr('수다 중', 'Chatting')}><i aria-hidden="true" />{member.status === 'away' ? tr('자리 비움', 'Away') : tr('수다 중', 'Chat')}</span>}
+                {!blockedIds.includes(member.id) && <span className={'member-status ' + (member.status ?? 'chatting')} title={statusLabel(member.status ?? 'chatting', lang)}><i aria-hidden="true" />{statusLabel(member.status ?? 'chatting', lang, true)}</span>}
                 {member.id !== id && <button className="link member-action" aria-pressed={blockedIds.includes(member.id)} aria-label={`${member.name} ${blockedIds.includes(member.id) ? tr('차단 해제', 'Unblock') : tr('차단', 'Block')}`} title={tr('이 접속에서 내 화면에만 적용됩니다', 'Only affects what you see during this visit')} onClick={() => toggleBlock(member.id)}>{blockedIds.includes(member.id) ? tr('차단 해제', 'Unblock') : tr('차단', 'Block')}</button>}
               </div>
             </li>)}</ul>

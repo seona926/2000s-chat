@@ -14,7 +14,8 @@ export const rooms = [
   { id: 'travel', group: '주제별', name: '여행·맛집', nameEn: 'Travel & Food', about: '다녀온 곳과 가보고 싶은 곳', aboutEn: 'Places visited and places to go' },
   { id: 'hobby', group: '주제별', name: '게임·취미', nameEn: 'Games & Hobbies', about: '요즘 즐기는 것들', aboutEn: 'Things you enjoy lately' },
 ]
-export type Member = { id: string; name: string; status?: 'chatting' | 'away' }
+export type MemberStatus = 'chatting' | 'away' | 'gaming' | 'busy'
+export type Member = { id: string; name: string; status?: MemberStatus }
 export type ChatStyle = { font: string; size: number; color: string; bold: boolean; italic: boolean; underline: boolean }
 export type Line = { id: string; at: number; text: string; from?: Member; whisperTo?: Member; style?: ChatStyle; image?: string }
 export type PollOption = { id: string; text: string; votes: number }

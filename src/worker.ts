@@ -1,8 +1,8 @@
 import { DurableObject } from 'cloudflare:workers'
-import { rooms, type ChatStyle, type GameRound, type Line, type Member, type RoomPoll } from './rooms'
+import { rooms, type ChatStyle, type GameRound, type Line, type Member, type MemberStatus, type RoomPoll } from './rooms'
 
 type Env = { CHAT: DurableObjectNamespace<Chat>; ASSETS: Fetcher }
-type Guest = Member & { room: string; queued: number; last: number; status: 'chatting' | 'away' }
+type Guest = Member & { room: string; queued: number; last: number; status: MemberStatus }
 type PollData = Omit<RoomPoll, 'myVote'> & { room: string; voters: Record<string, string> }
 type GameData = Omit<GameRound, 'players' | 'joined'> & { room: string; players: Record<string, { member: Member; score: number }> }
 const nicknameKey = (name: string) => name.normalize('NFKC').toLocaleLowerCase('ko-KR').replace(/\s+/g, ' ')
@@ -165,7 +165,7 @@ export class Chat extends DurableObject<Env> {
         this.presence()
         return
       case 'status':
-        if (value !== 'chatting' && value !== 'away') return
+        if (value !== 'chatting' && value !== 'away' && value !== 'gaming' && value !== 'busy') return
         guest.status = value
         this.save(socket, guest)
         break
