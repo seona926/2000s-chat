@@ -276,7 +276,9 @@ function App() {
           </div>
           {!pair && <aside className={'members' + (showMembers ? ' expanded' : '')}>
             <h2>☺ 접속자 {members.length}명</h2>
-            <ul>{members.map(member => <li key={member.id}><span title={member.name}>{member.name}{member.id === id ? ' (나)' : ''}</span>
+            <ul>{members.map(member => <li key={member.id}>{member.id === id
+              ? <button className="link member-self" title="닉네임 변경" onClick={() => openDialog('nick')}>{member.name} (나)</button>
+              : <span title={member.name}>{member.name}</span>}
               {member.id !== id && <button className="link" onClick={() => setHidden(previous => previous.includes(member.id) ? previous.filter(item => item !== member.id) : [...previous, member.id])}>{hidden.includes(member.id) ? '숨기기 해제' : '숨기기'}</button>}
             </li>)}</ul>
           </aside>}

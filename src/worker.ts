@@ -139,7 +139,7 @@ export class Chat extends DurableObject<Env> {
         guest.name = value
         this.save(socket, guest)
         this.send(socket, { type: 'name', name: value })
-        if (guest.room && oldName !== value) this.line(guest.room, `${oldName}님이 닉네임을 변경했습니다. (${oldName} → ${value})`)
+        if (guest.room && oldName !== value) this.line(guest.room, `${oldName}님이 ${value}으로 닉네임을 변경했습니다.`)
         this.presence()
         return
       case 'join':

@@ -196,3 +196,4 @@ body{background:#edf2fa}
   .window{flex:1}
   .chat-title h1{font-size:15px}
 }
+.members li .member-self{font:inherit;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
