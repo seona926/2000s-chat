@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 import { rooms, type ChatStyle, type GameRound, type Line, type Member, type RoomPoll } from './rooms'
 import { TetrisBoard } from './tetris'
+import { translateServerText, type Lang } from './i18n'
 import './style.css'
 
 type ChatEvent = {
@@ -95,6 +96,14 @@ function storedSetting(key: string, fallback: string) {
   try { return localStorage.getItem(key) ?? fallback } catch { return fallback }
 }
 
+function initialLang(): Lang {
+  const requested = new URLSearchParams(location.search).get('lang')
+  if (requested === 'ko' || requested === 'en') return requested
+  const saved = storedSetting('jeopsokjung-language', '')
+  if (saved === 'ko' || saved === 'en') return saved
+  return navigator.language.toLowerCase().startsWith('ko') ? 'ko' : 'en'
+}
+
 function App() {
   const socket = useRef<WebSocket | null>(null)
   const log = useRef<HTMLDivElement>(null)
@@ -106,6 +115,7 @@ function App() {
   const wasConnected = useRef(false)
   const lastContentSent = useRef(0)
   const [online, setOnline] = useState(false)
+  const [lang, setLang] = useState<Lang>(initialLang)
   const [id, setId] = useState('')
   const [name, setName] = useState('')
   const [room, setRoom] = useState('')
@@ -136,6 +146,34 @@ function App() {
   const [pollOptions, setPollOptions] = useState(['', ''])
   const [nickError, setNickError] = useState('')
   const modal = useRef<HTMLDialogElement>(null)
+  const en = lang === 'en'
+  const tr = (ko: string, english: string) => en ? english : ko
+
+  function chooseLang(next: Lang) {
+    setLang(next)
+    try { localStorage.setItem('jeopsokjung-language', next) } catch { /* This visit still uses the selected language. */ }
+  }
+
+  useEffect(() => {
+    document.documentElement.lang = lang
+    document.title = lang === 'en' ? 'Jeopsokjung | Chat Lobby' : '접속중 | 채팅 로비'
+  }, [lang])
+
+  useEffect(() => {
+    const requested = new URLSearchParams(location.search).get('lang')
+    if (requested === 'ko' || requested === 'en') return
+    if (storedSetting('jeopsokjung-language', '')) return
+    const controller = new AbortController()
+    fetch('/locale', { cache: 'no-store', signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then((data: unknown) => {
+        if (storedSetting('jeopsokjung-language', '')) return
+        const detected = data && typeof data === 'object' && 'lang' in data ? data.lang : null
+        if (detected === 'ko' || detected === 'en') setLang(detected)
+      })
+      .catch(() => { /* Browser language remains the fallback. */ })
+    return () => controller.abort()
+  }, [])
 
   function playRoomSound() {
     if (!soundEnabledRef.current || !audioContext.current) return
@@ -353,8 +391,8 @@ function App() {
     return (
       <ul className={'room-list' + (active ? ' active-list' : '')}>
         {list.map(item => <li key={item.id}>
-          <div><button className="link room-link" disabled={!online} onClick={() => send('join', item.id)}>{item.name}</button>{!active && <small>{item.about}</small>}</div>
-          <span className={counts[item.id] ? 'occupied' : 'vacant'}>{online ? (counts[item.id] ?? 0) + '명' : '—'}</span>
+          <div><button className="link room-link" disabled={!online} onClick={() => send('join', item.id)}>{en ? item.nameEn : item.name}</button>{!active && <small>{en ? item.aboutEn : item.about}</small>}</div>
+          <span className={counts[item.id] ? 'occupied' : 'vacant'}>{online ? en ? `${counts[item.id] ?? 0} here` : (counts[item.id] ?? 0) + '명' : '—'}</span>
         </li>)}
       </ul>
     )
@@ -377,134 +415,134 @@ function App() {
   const dailyJoke = dailyJokes[dailyJokeIndex]
 
   return (
-    <div className={'site' + (room ? ' in-room' : '')}>
+    <div className={'site' + (room ? ' in-room' : '') + (en ? ' english' : '')}>
       {!room && <header className="masthead">
-        <div className="identity"><span className="wordmark">접속<span>중</span><b>!</b></span><span className="masthead-slogan">오늘도 친구들과<br />반가운 수다 한마당 ♡</span></div>
-        <nav aria-label="서비스 메뉴"><span className="masthead-count">● 지금 {total}명 접속 중</span><button className="link" onClick={() => openDialog('help')}>이용 안내</button></nav>
+        <div className="identity"><span className="wordmark">접속<span>중</span><b>!</b></span><span className="masthead-slogan">{en ? <>A little chat<br />goes a long way ♡</> : <>오늘도 친구들과<br />반가운 수다 한마당 ♡</>}</span></div>
+        <nav aria-label={tr('서비스 메뉴', 'Site menu')}><span className="masthead-count">● {en ? `${total} online now` : `지금 ${total}명 접속 중`}</span><div className="language-switch" role="group" aria-label={tr('언어 선택', 'Language')}><button type="button" aria-pressed={!en} onClick={() => chooseLang('ko')}>한국어</button><button type="button" aria-pressed={en} onClick={() => chooseLang('en')}>EN</button></div><button className="link" onClick={() => openDialog('help')}>{tr('이용 안내', 'Help')}</button></nav>
       </header>}
       <main>
       {!room ? <>
-        <div className="portal-ticker"><b>접속중 알림</b><span>어서 오세요! 마음에 드는 방을 골라 자유롭게 이야기해 보세요.</span><span className="ticker-sparkle" aria-hidden="true">✦ ✦ ✦</span></div>
+        <div className="portal-ticker"><b>{tr('접속중 알림', 'Notice')}</b><span>{tr('어서 오세요! 마음에 드는 방을 골라 자유롭게 이야기해 보세요.', 'Welcome! Pick a room and join the conversation.')}</span><span className="ticker-sparkle" aria-hidden="true">✦ ✦ ✦</span></div>
         <div className="lobby-grid">
-        <aside className="lobby-side" aria-label="이용 정보">
-          <section className="portal-box"><h2>📌 바로가기</h2><button className="link" disabled={!online} onClick={() => send('join', 'free')}>자유채팅 입장하기</button><button className="link" disabled={!online} onClick={() => send('queue')}>랜덤 1:1 시작하기</button></section>
-          <section className="portal-box"><h2>💬 채팅 예절</h2><p>처음 만난 사람에게는 반갑게 인사해요!</p><button className="link" onClick={() => openDialog('help')}>이용 안내 보기 →</button></section>
+        <aside className="lobby-side" aria-label={tr('이용 정보', 'Quick links')}>
+          <section className="portal-box"><h2>📌 {tr('바로가기', 'Quick links')}</h2><button className="link" disabled={!online} onClick={() => send('join', 'free')}>{tr('자유채팅 입장하기', 'Enter Open Chat')}</button><button className="link" disabled={!online} onClick={() => send('queue')}>{tr('랜덤 1:1 시작하기', 'Start random 1:1')}</button></section>
+          <section className="portal-box"><h2>💬 {tr('채팅 예절', 'Chat etiquette')}</h2><p>{tr('처음 만난 사람에게는 반갑게 인사해요!', 'Say hello to someone new!')}</p><button className="link" onClick={() => openDialog('help')}>{tr('이용 안내 보기 →', 'Read the guide →')}</button></section>
         </aside>
         <div className="lobby-center">
-        <div className="bar lobby-title"><h1>★ 채팅방 골라 들어가기</h1><span><i className={online ? 'online' : ''} />{online ? '접속 ' + total + '명' : '서버 연결 중'}</span></div>
-        <div className="guest"><div>{name ? <><b>{name}</b>님, 어서 오세요.</> : '접속하는 중입니다.'}</div><button className="link" disabled={!online || waiting} onClick={() => openDialog('nick')}>닉네임 변경</button></div>
-        {notice && <div className="notice" role="status">{notice}</div>}
+        <div className="bar lobby-title"><h1>★ {tr('채팅방 골라 들어가기', 'Choose a chat room')}</h1><span><i className={online ? 'online' : ''} />{online ? en ? `${total} online` : '접속 ' + total + '명' : tr('서버 연결 중', 'Connecting')}</span></div>
+        <div className="guest"><div>{name ? <><b>{name}</b>{tr('님, 어서 오세요.', ', welcome!')}</> : tr('접속하는 중입니다.', 'Connecting…')}</div><button className="link" disabled={!online || waiting} onClick={() => openDialog('nick')}>{tr('닉네임 변경', 'Change nickname')}</button></div>
+        {notice && <div className="notice" role="status">{translateServerText(notice, lang)}</div>}
         <section className="random panel" aria-labelledby="random-title">
-          <div><h2 id="random-title">🎲 랜덤 1:1 채팅</h2><p role="status">{waiting ? `대기 중 ${waitingCount}명 · 다른 사람이 시작하면 자동으로 연결됩니다.` : `현재 대기 중 ${waitingCount}명 · 시작하면 자동으로 짝을 찾습니다.`}</p></div>
-          <button className="classic primary" disabled={!online} onClick={() => send(waiting ? 'leave' : 'queue')}>{waiting ? '대기 취소' : '랜덤 1:1 시작'}</button>
-          {waiting && <button className="link" onClick={() => send('join', 'free')}>자유채팅으로 이동</button>}
+          <div><h2 id="random-title">🎲 {tr('랜덤 1:1 채팅', 'Random 1:1 Chat')}</h2><p role="status">{waiting ? en ? `${waitingCount} waiting · You'll connect when someone else joins.` : `대기 중 ${waitingCount}명 · 다른 사람이 시작하면 자동으로 연결됩니다.` : en ? `${waitingCount} waiting · Start to find a chat partner.` : `현재 대기 중 ${waitingCount}명 · 시작하면 자동으로 짝을 찾습니다.`}</p></div>
+          <button className="classic primary" disabled={!online} onClick={() => send(waiting ? 'leave' : 'queue')}>{waiting ? tr('대기 취소', 'Cancel') : tr('랜덤 1:1 시작', 'Start random chat')}</button>
+          {waiting && <button className="link" onClick={() => send('join', 'free')}>{tr('자유채팅으로 이동', 'Go to Open Chat')}</button>}
         </section>
-        <section className="panel active" aria-labelledby="active-title"><div className="section-bar"><h2 id="active-title">★ 지금 대화 중인 방</h2></div>
-          {activeRooms.length ? roomList(activeRooms, true) : <div className="empty">{online ? '아직 대화 중인 공개방이 없습니다.' : '서버에 연결되면 채팅방을 볼 수 있습니다.'}<button className="classic" disabled={!online} onClick={() => send('join', 'free')}>자유채팅에 먼저 입장</button></div>}
-          {activeRooms.length > 0 && !counts.free && <div className="active-foot"><button className="link" disabled={!online} onClick={() => send('join', 'free')}>빈 자유채팅방에 입장하기 →</button></div>}
+        <section className="panel active" aria-labelledby="active-title"><div className="section-bar"><h2 id="active-title">★ {tr('지금 대화 중인 방', 'Active rooms')}</h2></div>
+          {activeRooms.length ? roomList(activeRooms, true) : <div className="empty">{online ? tr('아직 대화 중인 공개방이 없습니다.', 'No public rooms are active yet.') : tr('서버에 연결되면 채팅방을 볼 수 있습니다.', 'Rooms will appear after you connect.')}<button className="classic" disabled={!online} onClick={() => send('join', 'free')}>{tr('자유채팅에 먼저 입장', 'Enter Open Chat')}</button></div>}
+          {activeRooms.length > 0 && !counts.free && <div className="active-foot"><button className="link" disabled={!online} onClick={() => send('join', 'free')}>{tr('빈 자유채팅방에 입장하기 →', 'Be first in Open Chat →')}</button></div>}
         </section>
         <div className="directory">
           {['지역별', '주제별'].map(group => <section className="panel" key={group}>
-            <div className="section-bar"><h2>{group === '지역별' ? '🌏' : '💡'} {group} 채팅</h2></div>
+            <div className="section-bar"><h2>{group === '지역별' ? '🌏' : '💡'} {group === '지역별' ? tr('지역별 채팅', 'Chat by region') : tr('주제별 채팅', 'Chat by topic')}</h2></div>
             {roomList(rooms.filter(item => item.group === group))}
           </section>)}
         </div>
         </div>
-        <aside className="lobby-side lobby-side-right" aria-label="오늘의 소식">
-          <section className="portal-box online-box"><h2>👥 지금 접속 중</h2><strong>{total}<small>명</small></strong><p>같은 시간, 같은 채팅방에서 만나요.</p></section>
-          <section className="portal-box joke-box"><h2>😄 오늘의 아재개그</h2><p><b>Q.</b> {dailyJoke.question}</p><p><b>A.</b> {dailyJoke.answer}</p></section>
-          <section className="portal-box tip-box"><h2>✨ 오늘의 한마디</h2><p>먼저 “안녕하세요!” 하고 말을 걸어 보세요.</p></section>
+        <aside className="lobby-side lobby-side-right" aria-label={tr('오늘의 소식', 'Today')}>
+          <section className="portal-box online-box"><h2>👥 {tr('지금 접속 중', 'Online now')}</h2><strong>{total}<small>{tr('명', ' people')}</small></strong><p>{tr('같은 시간, 같은 채팅방에서 만나요.', 'Meet someone in a chat room.')}</p></section>
+          <section className="portal-box joke-box"><h2>😄 {tr('오늘의 아재개그', 'Conversation starter')}</h2>{en ? <p>What made you smile today?</p> : <><p><b>Q.</b> {dailyJoke.question}</p><p><b>A.</b> {dailyJoke.answer}</p></>}</section>
+          <section className="portal-box tip-box"><h2>✨ {tr('오늘의 한마디', 'A little tip')}</h2><p>{tr('먼저 “안녕하세요!” 하고 말을 걸어 보세요.', 'Say “hello” and start the conversation.')}</p></section>
         </aside>
         </div>
-      </> : <section className={'window panel chat-bg-' + chatBackground} aria-label="채팅방">
-        <div className="bar chat-title"><h1>{pair ? '랜덤 1:1 채팅' : current?.name}</h1><button className="classic" onClick={() => send('leave')}>← 로비로</button></div>
-        <div className="chat-menu"><span>{pair ? ended ? '대화 종료' : pairPeer && blockedIds.includes(pairPeer.id) ? '상대 차단됨' : '상대와 연결됨' : current?.about}</span>
-          <div className="chat-actions"><label className="status-control">내 상태 <select aria-label="내 접속 상태" value={members.find(member => member.id === id)?.status ?? 'chatting'} onChange={event => send('status', event.target.value)}><option value="chatting">수다 중</option><option value="away">자리 비움</option></select></label><button className="link" onClick={() => openDialog('nick')}>닉네임 변경</button>
-          {pairPeer && <button className="link" aria-pressed={blockedIds.includes(pairPeer.id)} aria-label={`${pairPeer.name} ${blockedIds.includes(pairPeer.id) ? '차단 해제' : '차단'}`} title="이 접속에서 내 화면에만 적용됩니다" onClick={() => toggleBlock(pairPeer.id)}>{blockedIds.includes(pairPeer.id) ? '차단 해제' : '상대 차단'}</button>}
-          {pair && <button className="link" onClick={() => send('queue')}>다음 상대</button>}
-          {!pair && <button className="link member-toggle" aria-expanded={showMembers} onClick={() => setShowMembers(!showMembers)}>접속자 {members.length}명</button>}</div>
+      </> : <section className={'window panel chat-bg-' + chatBackground} aria-label={tr('채팅방', 'Chat room')}>
+        <div className="bar chat-title"><h1>{pair ? tr('랜덤 1:1 채팅', 'Random 1:1 Chat') : en ? current?.nameEn : current?.name}</h1><div className="chat-title-actions"><div className="language-switch" role="group" aria-label={tr('언어 선택', 'Language')}><button type="button" aria-pressed={!en} onClick={() => chooseLang('ko')}>한국어</button><button type="button" aria-pressed={en} onClick={() => chooseLang('en')}>EN</button></div><button className="classic" onClick={() => send('leave')}>{tr('← 로비로', '← Lobby')}</button></div></div>
+        <div className="chat-menu"><span>{pair ? ended ? tr('대화 종료', 'Chat ended') : pairPeer && blockedIds.includes(pairPeer.id) ? tr('상대 차단됨', 'Partner blocked') : tr('상대와 연결됨', 'Connected to a partner') : en ? current?.aboutEn : current?.about}</span>
+          <div className="chat-actions"><label className="status-control">{tr('내 상태', 'Status')} <select aria-label={tr('내 접속 상태', 'My status')} value={members.find(member => member.id === id)?.status ?? 'chatting'} onChange={event => send('status', event.target.value)}><option value="chatting">{tr('수다 중', 'Chatting')}</option><option value="away">{tr('자리 비움', 'Away')}</option></select></label><button className="link" onClick={() => openDialog('nick')}>{tr('닉네임 변경', 'Change name')}</button>
+          {pairPeer && <button className="link" aria-pressed={blockedIds.includes(pairPeer.id)} aria-label={`${pairPeer.name} ${blockedIds.includes(pairPeer.id) ? tr('차단 해제', 'Unblock') : tr('차단', 'Block')}`} title={tr('이 접속에서 내 화면에만 적용됩니다', 'Only affects what you see during this visit')} onClick={() => toggleBlock(pairPeer.id)}>{blockedIds.includes(pairPeer.id) ? tr('차단 해제', 'Unblock') : tr('상대 차단', 'Block partner')}</button>}
+          {pair && <button className="link" onClick={() => send('queue')}>{tr('다음 상대', 'Next partner')}</button>}
+          {!pair && <button className="link member-toggle" aria-expanded={showMembers} onClick={() => setShowMembers(!showMembers)}>{en ? `${members.length} people` : `접속자 ${members.length}명`}</button>}</div>
         </div>
-        {!pair && <div className="room-tools"><button className="tool-button" disabled={Boolean(poll && !poll.closed)} onClick={() => openDialog('poll')}>🗳️ 투표 만들기</button><button className={'tool-button' + (activeTab === 'game' ? ' selected' : '')} aria-current={activeTab === 'game' ? 'page' : undefined} onClick={() => setActiveTab(activeTab === 'game' ? 'chat' : 'game')}>🎮 테트리스{gameRound && !gameRound.ended ? ' · 진행 중' : ''}</button></div>}
-        {!pair && <div className="daily-phrase"><strong>오늘의 아재개그</strong><span><b>Q.</b> {dailyJoke.question} <b>A.</b> {dailyJoke.answer}</span></div>}
+        {!pair && <div className="room-tools"><button className="tool-button" disabled={Boolean(poll && !poll.closed)} onClick={() => openDialog('poll')}>🗳️ {tr('투표 만들기', 'Create poll')}</button><button className={'tool-button' + (activeTab === 'game' ? ' selected' : '')} aria-current={activeTab === 'game' ? 'page' : undefined} onClick={() => setActiveTab(activeTab === 'game' ? 'chat' : 'game')}>🎮 {tr('테트리스', 'Tetris')}{gameRound && !gameRound.ended ? tr(' · 진행 중', ' · Live') : ''}</button></div>}
+        {!pair && <div className="daily-phrase"><strong>{tr('오늘의 아재개그', 'Conversation starter')}</strong><span>{en ? 'What made you smile today?' : <><b>Q.</b> {dailyJoke.question} <b>A.</b> {dailyJoke.answer}</>}</span></div>}
         <div className="workspace">
-          <div className="log" ref={log} role="log" aria-label="대화 로그" tabIndex={0} hidden={activeTab === 'game'}>
-            {poll && <section className={'poll-panel' + (poll.closed ? ' is-closed' : '')} aria-label="방 투표">
-              <div className="poll-heading"><h2>{poll.question}</h2><span>{poll.closed ? '종료된 투표' : '진행 중 투표'}</span></div>
+          <div className="log" ref={log} role="log" aria-label={tr('대화 로그', 'Chat log')} tabIndex={0} hidden={activeTab === 'game'}>
+            {poll && <section className={'poll-panel' + (poll.closed ? ' is-closed' : '')} aria-label={tr('방 투표', 'Room poll')}>
+              <div className="poll-heading"><h2>{poll.question}</h2><span>{poll.closed ? tr('종료된 투표', 'Poll closed') : tr('진행 중 투표', 'Poll open')}</span></div>
               <div className="poll-options">{poll.options.map(option => {
                 const totalVotes = poll.options.reduce((sum, item) => sum + item.votes, 0)
                 const percent = totalVotes ? Math.round(option.votes * 100 / totalVotes) : 0
                 return <button key={option.id} className={'poll-option' + (poll.myVote === option.id ? ' is-selected' : '')} disabled={poll.closed} onClick={() => send('pollVote', option.id, poll.id)}>
-                  <span className="poll-option-label">{option.text}<b>{option.votes}표 · {percent}%</b></span><i style={{ width: percent + '%' }} />
+                  <span className="poll-option-label">{option.text}<b>{en ? `${option.votes} votes` : `${option.votes}표`} · {percent}%</b></span><i style={{ width: percent + '%' }} />
                 </button>
               })}</div>
-              <div className="poll-footer"><span>{poll.myVote ? '선택을 눌러 표를 변경할 수 있어요.' : poll.closed ? '투표가 종료되었습니다.' : '원하는 항목에 투표해 주세요.'}</span>{id === poll.owner.id && !poll.closed && <button className="link" onClick={() => send('pollClose', '', poll.id)}>투표 마감</button>}</div>
+              <div className="poll-footer"><span>{poll.myVote ? tr('선택을 눌러 표를 변경할 수 있어요.', 'Choose another option to change your vote.') : poll.closed ? tr('투표가 종료되었습니다.', 'This poll has closed.') : tr('원하는 항목에 투표해 주세요.', 'Choose an option to vote.')}</span>{id === poll.owner.id && !poll.closed && <button className="link" onClick={() => send('pollClose', '', poll.id)}>{tr('투표 마감', 'Close poll')}</button>}</div>
             </section>}
-            {!lines.length && !ended && <div className="empty-chat"><span aria-hidden="true">｡･:*:･ﾟ★</span><strong>아직 대화가 없어요</strong><p>오늘의 아재개그로 가볍게 웃으며 시작해 보세요.</p></div>}
+            {!lines.length && !ended && <div className="empty-chat"><span aria-hidden="true">｡･:*:･ﾟ★</span><strong>{tr('아직 대화가 없어요', 'No messages yet')}</strong><p>{tr('오늘의 아재개그로 가볍게 웃으며 시작해 보세요.', 'Say hello to get the conversation going.')}</p></div>}
             {lines.filter(line => !line.from || !blockedIds.includes(line.from.id)).map(line =>
               <div className={line.from ? 'chat-line' + (line.whisperTo ? ' whisper-line' : '') : 'chat-line system'} key={line.id}>
                 <time dateTime={new Date(line.at).toISOString()}>[{time.format(line.at)}]</time>
-                <div>{line.from && <b style={{ color: nameColor(line.from.id) }}>{line.whisperTo ? line.from.id === id ? `귓속말 → ${line.whisperTo.name}: ` : `귓속말 ← ${line.from.name}: ` : `${line.from.name}: `}</b>}{line.image ? <img className="chat-image" src={line.image} alt="채팅으로 보낸 이미지" /> : <span style={line.style ? { color: line.style.color, fontFamily: line.style.font, fontSize: line.style.font === 'Nanum Pen Script' ? line.style.size * 1.25 : line.style.size, fontWeight: line.style.bold ? 'bold' : 'normal', fontStyle: line.style.italic ? 'italic' : 'normal', textDecoration: line.style.underline ? 'underline' : 'none' } : undefined}>{line.text}</span>}
+                <div>{line.from && <b style={{ color: nameColor(line.from.id) }}>{line.whisperTo ? line.from.id === id ? `${tr('귓속말', 'Whisper')} → ${line.whisperTo.name}: ` : `${tr('귓속말', 'Whisper')} ← ${line.from.name}: ` : `${line.from.name}: `}</b>}{line.image ? <img className="chat-image" src={line.image} alt={tr('채팅으로 보낸 이미지', 'Image sent in chat')} /> : <span style={line.style ? { color: line.style.color, fontFamily: line.style.font, fontSize: line.style.font === 'Nanum Pen Script' ? line.style.size * 1.25 : line.style.size, fontWeight: line.style.bold ? 'bold' : 'normal', fontStyle: line.style.italic ? 'italic' : 'normal', textDecoration: line.style.underline ? 'underline' : 'none' } : undefined}>{line.from ? line.text : translateServerText(line.text, lang)}</span>}
                 </div>
               </div>
             )}
-            {ended && <p className="ended" role="status">상대가 대화를 종료했습니다.</p>}
+            {ended && <p className="ended" role="status">{tr('상대가 대화를 종료했습니다.', 'Your partner ended the chat.')}</p>}
           </div>
-          <TetrisBoard round={gameRound} active={activeTab === 'game'} onCreate={() => { setActiveTab('game'); send('gameCreate') }} onJoin={roundId => send('gameJoin', '', roundId)} onScore={(roundId, score) => send('gameScore', String(score), roundId)} />
+          <TetrisBoard lang={lang} round={gameRound} active={activeTab === 'game'} onCreate={() => { setActiveTab('game'); send('gameCreate') }} onJoin={roundId => send('gameJoin', '', roundId)} onScore={(roundId, score) => send('gameScore', String(score), roundId)} />
           {!pair && <aside className={'members' + (showMembers ? ' expanded' : '')}>
-            <h2>☺ 접속자 {members.length}명</h2>
+            <h2>☺ {en ? `${members.length} people here` : `접속자 ${members.length}명`}</h2>
             <ul>{members.map(member => <li key={member.id} className={blockedIds.includes(member.id) ? 'is-blocked' : undefined}>
               {member.id === id
-                ? <button className="link member-self" title="닉네임 변경" onClick={() => openDialog('nick')}>{member.name} (나)</button>
-                : <button className="link member-name" disabled={blockedIds.includes(member.id)} title={blockedIds.includes(member.id) ? '차단 해제 후 귓속말을 보낼 수 있습니다' : member.name + '에게 귓속말 수신자로 지정'} aria-pressed={whisperToId === member.id} onClick={() => { setWhisperToId(current => current === member.id ? '' : member.id); input.current?.focus() }}>{member.name}</button>}
+                ? <button className="link member-self" title={tr('닉네임 변경', 'Change nickname')} onClick={() => openDialog('nick')}>{member.name} {tr('(나)', '(me)')}</button>
+                : <button className="link member-name" disabled={blockedIds.includes(member.id)} title={blockedIds.includes(member.id) ? tr('차단 해제 후 귓속말을 보낼 수 있습니다', 'Unblock to send a whisper') : en ? `Whisper to ${member.name}` : member.name + '에게 귓속말 수신자로 지정'} aria-pressed={whisperToId === member.id} onClick={() => { setWhisperToId(current => current === member.id ? '' : member.id); input.current?.focus() }}>{member.name}</button>}
               <div className="member-row-actions">
-                {!blockedIds.includes(member.id) && <span className={'member-status' + (member.status === 'away' ? ' away' : '')} title={member.status === 'away' ? '자리 비움' : '수다 중'}><i aria-hidden="true" />{member.status === 'away' ? '자리 비움' : '수다 중'}</span>}
-                {member.id !== id && <button className="link member-action" aria-pressed={blockedIds.includes(member.id)} aria-label={`${member.name} ${blockedIds.includes(member.id) ? '차단 해제' : '차단'}`} title="이 접속에서 내 화면에만 적용됩니다" onClick={() => toggleBlock(member.id)}>{blockedIds.includes(member.id) ? '차단 해제' : '차단'}</button>}
+                {!blockedIds.includes(member.id) && <span className={'member-status' + (member.status === 'away' ? ' away' : '')} title={member.status === 'away' ? tr('자리 비움', 'Away') : tr('수다 중', 'Chatting')}><i aria-hidden="true" />{member.status === 'away' ? tr('자리 비움', 'Away') : tr('수다 중', 'Chat')}</span>}
+                {member.id !== id && <button className="link member-action" aria-pressed={blockedIds.includes(member.id)} aria-label={`${member.name} ${blockedIds.includes(member.id) ? tr('차단 해제', 'Unblock') : tr('차단', 'Block')}`} title={tr('이 접속에서 내 화면에만 적용됩니다', 'Only affects what you see during this visit')} onClick={() => toggleBlock(member.id)}>{blockedIds.includes(member.id) ? tr('차단 해제', 'Unblock') : tr('차단', 'Block')}</button>}
               </div>
             </li>)}</ul>
           </aside>}
         </div>
-        {notice && <div className="notice" role="status">{notice}</div>}
-        <div className="format-row" aria-label="메시지 꾸미기">
-          <button type="button" className="tool-button" aria-expanded={emojis} onClick={() => setEmojis(!emojis)}>☺ 이모지</button>
-          <button type="button" className="tool-button" onClick={() => upload.current?.click()}>▧ 이미지</button>
-          <label className="background-picker">배경 <select aria-label="채팅방 배경" value={chatBackground} onChange={event => { setChatBackground(event.target.value); try { localStorage.setItem('jeopsokjung-chat-background', event.target.value) } catch { /* The setting remains active for this visit. */ } }}><option value="paper">종이</option><option value="sky">하늘</option><option value="rose">분홍</option><option value="mint">민트</option></select></label>
-          <button type="button" className="tool-button sound-toggle" aria-pressed={soundEnabled} onClick={toggleSounds}>♫ 효과음 {soundEnabled ? '켬' : '끔'}</button>
-          <input ref={upload} className="file-input" type="file" accept="image/*" aria-label="이미지 선택" onChange={event => void sendImage(event.target.files?.[0])} />
-          <button type="button" className="tool-button format-panel-toggle" aria-expanded={showFormatting} aria-controls="format-controls" onClick={() => setShowFormatting(!showFormatting)}>Aa 글자 꾸미기 {showFormatting ? '▴' : '▾'}</button>
+        {notice && <div className="notice" role="status">{translateServerText(notice, lang)}</div>}
+        <div className="format-row" aria-label={tr('메시지 꾸미기', 'Message formatting')}>
+          <button type="button" className="tool-button" aria-expanded={emojis} onClick={() => setEmojis(!emojis)}>☺ {tr('이모지', 'Emoji')}</button>
+          <button type="button" className="tool-button" onClick={() => upload.current?.click()}>▧ {tr('이미지', 'Image')}</button>
+          <label className="background-picker">{tr('배경', 'Theme')} <select aria-label={tr('채팅방 배경', 'Chat background')} value={chatBackground} onChange={event => { setChatBackground(event.target.value); try { localStorage.setItem('jeopsokjung-chat-background', event.target.value) } catch { /* The setting remains active for this visit. */ } }}><option value="paper">{tr('종이', 'Paper')}</option><option value="sky">{tr('하늘', 'Sky')}</option><option value="rose">{tr('분홍', 'Rose')}</option><option value="mint">{tr('민트', 'Mint')}</option></select></label>
+          <button type="button" className="tool-button sound-toggle" aria-pressed={soundEnabled} onClick={toggleSounds}>♫ {tr('효과음', 'Sound')} {soundEnabled ? tr('켬', 'On') : tr('끔', 'Off')}</button>
+          <input ref={upload} className="file-input" type="file" accept="image/*" aria-label={tr('이미지 선택', 'Choose image')} onChange={event => void sendImage(event.target.files?.[0])} />
+          <button type="button" className="tool-button format-panel-toggle" aria-expanded={showFormatting} aria-controls="format-controls" onClick={() => setShowFormatting(!showFormatting)}>Aa {tr('글자 꾸미기', 'Text style')} {showFormatting ? '▴' : '▾'}</button>
           <div id="format-controls" className={'format-controls' + (showFormatting ? ' expanded' : '')}>
-          <select aria-label="글꼴" value={style.font} onChange={event => setStyle(previous => ({ ...previous, font: event.target.value }))}>
-            <option value="Nanum Gothic">나눔고딕</option>
-            <option value="Nanum Myeongjo">나눔명조</option>
-            <option value="Nanum Pen Script">나눔손글씨</option>
+          <select aria-label={tr('글꼴', 'Font')} value={style.font} onChange={event => setStyle(previous => ({ ...previous, font: event.target.value }))}>
+            <option value="Nanum Gothic">{tr('나눔고딕', 'Sans')}</option>
+            <option value="Nanum Myeongjo">{tr('나눔명조', 'Serif')}</option>
+            <option value="Nanum Pen Script">{tr('나눔손글씨', 'Handwriting')}</option>
           </select>
-          <select aria-label="글자 크기" value={style.size} onChange={event => setStyle(previous => ({ ...previous, size: Number(event.target.value) }))}>{[12, 14, 16, 18].map(size => <option key={size} value={size}>{size}</option>)}</select>
-          {['#222222', '#c22552', '#205a9e', '#287744', '#713ca1'].map(color => <button key={color} type="button" title={'글자색 ' + color} aria-pressed={style.color === color} className="color-choice" style={{ backgroundColor: color }} onClick={() => setStyle(previous => ({ ...previous, color }))} />)}
-          {(['bold', 'italic', 'underline'] as const).map((key) => <button key={key} type="button" className="format-toggle" aria-label={{ bold: '굵게', italic: '기울임', underline: '밑줄' }[key]} aria-pressed={style[key]} onClick={() => setStyle(previous => ({ ...previous, [key]: !previous[key] }))}>{key === 'bold' ? <b>B</b> : key === 'italic' ? <i>I</i> : <u>U</u>}</button>)}
+          <select aria-label={tr('글자 크기', 'Font size')} value={style.size} onChange={event => setStyle(previous => ({ ...previous, size: Number(event.target.value) }))}>{[12, 14, 16, 18].map(size => <option key={size} value={size}>{size}</option>)}</select>
+          {['#222222', '#c22552', '#205a9e', '#287744', '#713ca1'].map(color => <button key={color} type="button" title={tr('글자색 ', 'Text color ') + color} aria-pressed={style.color === color} className="color-choice" style={{ backgroundColor: color }} onClick={() => setStyle(previous => ({ ...previous, color }))} />)}
+          {(['bold', 'italic', 'underline'] as const).map((key) => <button key={key} type="button" className="format-toggle" aria-label={key === 'bold' ? tr('굵게', 'Bold') : key === 'italic' ? tr('기울임', 'Italic') : tr('밑줄', 'Underline')} aria-pressed={style[key]} onClick={() => setStyle(previous => ({ ...previous, [key]: !previous[key] }))}>{key === 'bold' ? <b>B</b> : key === 'italic' ? <i>I</i> : <u>U</u>}</button>)}
           </div>
         </div>
         {emojis && <div className="emoji-picker">{['😀','😂','🥹','😍','😎','😭','😡','👍','👏','❤️','💐','🐱','✨','🎉','☕','🍰'].map(emoji => <button type="button" key={emoji} onClick={() => { setMessage(previous => previous + emoji); setEmojis(false); input.current?.focus() }}>{emoji}</button>)}</div>}
         {!pair && <div className={'whisper-target' + (whisperRecipient ? ' is-active' : '')}>
-          <label htmlFor="whisper-recipient">귓속말</label>
+          <label htmlFor="whisper-recipient">{tr('귓속말', 'Whisper')}</label>
           <select id="whisper-recipient" value={whisperToId} disabled={ended} onChange={event => setWhisperToId(event.target.value)}>
-            <option value="">전체 대화방</option>
-            {members.filter(member => member.id !== id && !blockedIds.includes(member.id)).map(member => <option key={member.id} value={member.id}>{member.name}에게</option>)}
+            <option value="">{tr('전체 대화방', 'Everyone')}</option>
+            {members.filter(member => member.id !== id && !blockedIds.includes(member.id)).map(member => <option key={member.id} value={member.id}>{en ? `To ${member.name}` : `${member.name}에게`}</option>)}
           </select>
-          {whisperRecipient && <><span className="whisper-confirm">{whisperRecipient.name}님만 받습니다</span><button type="button" className="link" onClick={() => setWhisperToId('')}>해제</button></>}
+          {whisperRecipient && <><span className="whisper-confirm">{en ? `Only ${whisperRecipient.name} will see this` : `${whisperRecipient.name}님만 받습니다`}</span><button type="button" className="link" onClick={() => setWhisperToId('')}>{tr('해제', 'Clear')}</button></>}
         </div>}
         <form className="compose" onSubmit={submit}>
-          <input ref={input} aria-label={whisperRecipient ? whisperRecipient.name + '에게 보낼 귓속말' : '메시지'} style={previewStyle} value={message} maxLength={400} disabled={ended} onChange={event => setMessage(event.target.value)} placeholder={ended ? '다음 상대를 찾거나 로비로 돌아가세요.' : whisperRecipient ? whisperRecipient.name + '님에게 귓속말을 입력하세요' : '메시지를 입력하세요'} />
-          <button className="classic primary" disabled={ended || !message.trim()}>{whisperRecipient ? '귓속말 보내기' : '전송'}</button>
+          <input ref={input} aria-label={whisperRecipient ? en ? `Whisper to ${whisperRecipient.name}` : whisperRecipient.name + '에게 보낼 귓속말' : tr('메시지', 'Message')} style={previewStyle} value={message} maxLength={400} disabled={ended} onChange={event => setMessage(event.target.value)} placeholder={ended ? tr('다음 상대를 찾거나 로비로 돌아가세요.', 'Find another partner or return to the lobby.') : whisperRecipient ? en ? `Whisper to ${whisperRecipient.name}` : whisperRecipient.name + '님에게 귓속말을 입력하세요' : tr('메시지를 입력하세요', 'Type a message')} />
+          <button className="classic primary" disabled={ended || !message.trim()}>{whisperRecipient ? tr('귓속말 보내기', 'Send whisper') : tr('전송', 'Send')}</button>
         </form>
-        <div className="status-bar"><span>접속중! Chat</span><span>{online ? '● 연결됨' : '○ 연결 중'}</span><span>온라인 {total}명</span></div>
+        <div className="status-bar"><span>Jeopsokjung! Chat</span><span>{online ? tr('● 연결됨', '● Connected') : tr('○ 연결 중', '○ Connecting')}</span><span>{en ? `${total} online` : `온라인 ${total}명`}</span></div>
       </section>}
       </main>
       <dialog ref={modal} onClose={() => setDialog(null)}>
-        <div className="bar dialog-title">{dialog === 'nick' ? '닉네임 변경' : dialog === 'poll' ? '새 투표 만들기' : '이용 안내'}</div>
+        <div className="bar dialog-title">{dialog === 'nick' ? tr('닉네임 변경', 'Change nickname') : dialog === 'poll' ? tr('새 투표 만들기', 'Create a poll') : tr('이용 안내', 'Help')}</div>
         <form onSubmit={submitDialog}>
-          {dialog === 'nick' && <><label>닉네임 <input autoFocus required minLength={2} maxLength={16} value={draft} onChange={event => { setDraft(event.target.value); setNickError('') }} /></label>{nickError && <p className="dialog-error" role="alert">{nickError}</p>}</>}
-          {dialog === 'poll' && <div className="poll-form"><label>질문 <input autoFocus required maxLength={80} value={pollQuestion} onChange={event => setPollQuestion(event.target.value)} placeholder="예: 오늘 점심 뭐 먹을까요?" /></label><fieldset><legend>선택지 (2~4개)</legend>{pollOptions.map((option, index) => <div className="poll-option-input" key={index}><input required={index < 2} maxLength={32} aria-label={`선택지 ${index + 1}`} value={option} onChange={event => setPollOptions(previous => previous.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={`선택지 ${index + 1}`} />{index > 1 && <button type="button" className="link" onClick={() => setPollOptions(previous => previous.filter((_, itemIndex) => itemIndex !== index))}>삭제</button>}</div>)}</fieldset>{pollOptions.length < 4 && <button type="button" className="link" onClick={() => setPollOptions(previous => [...previous, ''])}>+ 선택지 추가</button>}</div>}
-          {dialog === 'help' && <p>닉네임으로 입장해 대화할 수 있습니다. 개인정보 공유, 괴롭힘, 도배는 삼가 주세요. 불편한 사용자는 공개방 접속자 목록이나 랜덤 1:1 상단에서 차단할 수 있습니다. 차단은 내 화면에서만 적용되며 상대가 재접속하면 새 사용자로 표시됩니다.</p>}
-          <div className="dialog-actions"><button type="button" className="classic" onClick={() => setDialog(null)}>{dialog === 'help' ? '닫기' : '취소'}</button>{dialog !== 'help' && <button className="classic primary">{dialog === 'poll' ? '투표 시작' : '변경'}</button>}</div>
+          {dialog === 'nick' && <><label>{tr('닉네임', 'Nickname')} <input autoFocus required minLength={2} maxLength={16} value={draft} onChange={event => { setDraft(event.target.value); setNickError('') }} /></label>{nickError && <p className="dialog-error" role="alert">{translateServerText(nickError, lang)}</p>}</>}
+          {dialog === 'poll' && <div className="poll-form"><label>{tr('질문', 'Question')} <input autoFocus required maxLength={80} value={pollQuestion} onChange={event => setPollQuestion(event.target.value)} placeholder={tr('예: 오늘 점심 뭐 먹을까요?', 'For example: What should we have for lunch?')} /></label><fieldset><legend>{tr('선택지 (2~4개)', 'Choices (2–4)')}</legend>{pollOptions.map((option, index) => <div className="poll-option-input" key={index}><input required={index < 2} maxLength={32} aria-label={en ? `Choice ${index + 1}` : `선택지 ${index + 1}`} value={option} onChange={event => setPollOptions(previous => previous.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={en ? `Choice ${index + 1}` : `선택지 ${index + 1}`} />{index > 1 && <button type="button" className="link" onClick={() => setPollOptions(previous => previous.filter((_, itemIndex) => itemIndex !== index))}>{tr('삭제', 'Remove')}</button>}</div>)}</fieldset>{pollOptions.length < 4 && <button type="button" className="link" onClick={() => setPollOptions(previous => [...previous, ''])}>{tr('+ 선택지 추가', '+ Add choice')}</button>}</div>}
+          {dialog === 'help' && <p>{tr('닉네임으로 입장해 대화할 수 있습니다. 개인정보 공유, 괴롭힘, 도배는 삼가 주세요. 불편한 사용자는 공개방 접속자 목록이나 랜덤 1:1 상단에서 차단할 수 있습니다. 차단은 내 화면에서만 적용되며 상대가 재접속하면 새 사용자로 표시됩니다.', 'Join with a nickname and chat freely. Please avoid sharing personal information, harassment and spam. You can block someone from a public room’s people list or the random chat menu. Blocking only hides them on your screen during this visit; a reconnect gives them a new ID.')}</p>}
+          <div className="dialog-actions"><button type="button" className="classic" onClick={() => setDialog(null)}>{dialog === 'help' ? tr('닫기', 'Close') : tr('취소', 'Cancel')}</button>{dialog !== 'help' && <button className="classic primary">{dialog === 'poll' ? tr('투표 시작', 'Start poll') : tr('변경', 'Save')}</button>}</div>
         </form>
       </dialog>
     </div>

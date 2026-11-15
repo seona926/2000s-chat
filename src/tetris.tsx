@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { GameRound } from './rooms'
+import type { Lang } from './i18n'
 
 const WIDTH = 10
 const HEIGHT = 20
@@ -69,9 +70,10 @@ function freshEngine(): Engine {
   return { board, piece: newPiece(board), score: 0, over: false }
 }
 
-type Props = { round: GameRound | null; active: boolean; onCreate: () => void; onJoin: (id: string) => void; onScore: (id: string, score: number) => void }
+type Props = { lang: Lang; round: GameRound | null; active: boolean; onCreate: () => void; onJoin: (id: string) => void; onScore: (id: string, score: number) => void }
 
-export function TetrisBoard({ round, active, onCreate, onJoin, onScore }: Props) {
+export function TetrisBoard({ lang, round, active, onCreate, onJoin, onScore }: Props) {
+  const en = lang === 'en'
   const engine = useRef<Engine>(freshEngine())
   const lastReported = useRef(0)
   const expiryReported = useRef(false)
@@ -176,17 +178,17 @@ export function TetrisBoard({ round, active, onCreate, onJoin, onScore }: Props)
   const displayBoard = cells.map((row, y) => row.map((cell, x) => cell || engine.current.board[y][x]))
   const rankings = [...(round?.players ?? [])].sort((a, b) => b.score - a.score)
 
-  return <section className="game-view" hidden={!active} aria-label="테트리스 친선 라운드">
-    <div className="game-heading"><div><h2>테트리스 친선 라운드</h2><p>2분 동안 점수를 겨뤄 보세요. 기록은 이 라운드에서만 보여요.</p></div>{round && <strong className={finished ? 'round-finished' : 'round-clock'}>{finished ? '라운드 종료' : `남은 시간 ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`}</strong>}</div>
-    {!round ? <div className="game-empty"><p>같은 방 사람들과 2분 한 판을 시작해 보세요.</p><button className="classic primary" onClick={onCreate}>라운드 시작</button></div>
+  return <section className="game-view" hidden={!active} aria-label={en ? 'Friendly Tetris round' : '테트리스 친선 라운드'}>
+    <div className="game-heading"><div><h2>{en ? 'Friendly Tetris round' : '테트리스 친선 라운드'}</h2><p>{en ? 'Compete for two minutes. Scores are shown for this round only.' : '2분 동안 점수를 겨뤄 보세요. 기록은 이 라운드에서만 보여요.'}</p></div>{round && <strong className={finished ? 'round-finished' : 'round-clock'}>{finished ? en ? 'Round over' : '라운드 종료' : `${en ? 'Time left' : '남은 시간'} ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`}</strong>}</div>
+    {!round ? <div className="game-empty"><p>{en ? 'Start a two-minute round with people in this room.' : '같은 방 사람들과 2분 한 판을 시작해 보세요.'}</p><button className="classic primary" onClick={onCreate}>{en ? 'Start round' : '라운드 시작'}</button></div>
       : <div className="game-layout">
-        <div className="board-column"><div className="tetris-board" role="grid" tabIndex={0} aria-label={`테트리스 보드, ${engine.current.score}점`}>
-          {displayBoard.flatMap((row, y) => row.map((cell, x) => <i role="gridcell" aria-label={cell ? '블록' : '빈 칸'} className={cell ? `cell color-${cell}` : 'cell'} key={`${y}-${x}`} />))}
-        </div><p className="game-score">내 점수 <b>{engine.current.score}</b>{engine.current.over && !finished && <span> 게임 오버</span>}</p>
-          {joined && !finished && <div className="game-controls" aria-label="테트리스 조작"><button onClick={() => act('left')} aria-label="왼쪽">←</button><button onClick={() => act('rotate')} aria-label="회전">↻</button><button onClick={() => act('right')} aria-label="오른쪽">→</button><button onClick={() => act('down')} aria-label="한 칸 내리기">↓</button><button onClick={() => act('drop')} aria-label="바로 내리기">바로 내리기</button></div>}
-          {!joined && !finished && <button className="classic primary" onClick={() => onJoin(round.id)}>이번 판 참가</button>}
+        <div className="board-column"><div className="tetris-board" role="grid" tabIndex={0} aria-label={en ? `Tetris board, ${engine.current.score} points` : `테트리스 보드, ${engine.current.score}점`}>
+          {displayBoard.flatMap((row, y) => row.map((cell, x) => <i role="gridcell" aria-label={cell ? en ? 'Block' : '블록' : en ? 'Empty' : '빈 칸'} className={cell ? `cell color-${cell}` : 'cell'} key={`${y}-${x}`} />))}
+        </div><p className="game-score">{en ? 'My score' : '내 점수'} <b>{engine.current.score}</b>{engine.current.over && !finished && <span> {en ? 'Game over' : '게임 오버'}</span>}</p>
+          {joined && !finished && <div className="game-controls" aria-label={en ? 'Tetris controls' : '테트리스 조작'}><button onClick={() => act('left')} aria-label={en ? 'Left' : '왼쪽'}>←</button><button onClick={() => act('rotate')} aria-label={en ? 'Rotate' : '회전'}>↻</button><button onClick={() => act('right')} aria-label={en ? 'Right' : '오른쪽'}>→</button><button onClick={() => act('down')} aria-label={en ? 'Down one' : '한 칸 내리기'}>↓</button><button onClick={() => act('drop')} aria-label={en ? 'Hard drop' : '바로 내리기'}>{en ? 'Drop' : '바로 내리기'}</button></div>}
+          {!joined && !finished && <button className="classic primary" onClick={() => onJoin(round.id)}>{en ? 'Join round' : '이번 판 참가'}</button>}
         </div>
-        <aside className="game-rank"><h3>{finished ? '라운드 결과' : '현재 점수'}</h3>{rankings.length ? <ol>{rankings.map((player, index) => <li key={player.member.id}><span>{index + 1}. {player.member.name}</span><b>{player.score}</b></li>)}</ol> : <p>아직 참가자가 없어요.</p>}{!finished && <small>방에 있는 사람은 언제든 참가할 수 있어요.</small>}</aside>
+        <aside className="game-rank"><h3>{finished ? en ? 'Results' : '라운드 결과' : en ? 'Scores' : '현재 점수'}</h3>{rankings.length ? <ol>{rankings.map((player, index) => <li key={player.member.id}><span>{index + 1}. {player.member.name}</span><b>{player.score}</b></li>)}</ol> : <p>{en ? 'No players yet.' : '아직 참가자가 없어요.'}</p>}{!finished && <small>{en ? 'Anyone in the room can join.' : '방에 있는 사람은 언제든 참가할 수 있어요.'}</small>}</aside>
       </div>}
   </section>
 }

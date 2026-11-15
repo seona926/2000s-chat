@@ -10,6 +10,11 @@ const nicknameKey = (name: string) => name.normalize('NFKC').toLocaleLowerCase('
 export default {
   fetch(request: Request, env: Env) {
     const url = new URL(request.url)
+    if (url.pathname === '/locale') {
+      const country = request.cf?.country
+      const lang = country === 'KR' ? 'ko' : country && country !== 'XX' && country !== 'T1' ? 'en' : null
+      return Response.json({ lang }, { headers: { 'Cache-Control': 'private, no-store' } })
+    }
     if (url.pathname !== '/socket') return env.ASSETS.fetch(request)
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return new Response('WebSocket required', { status: 426 })
     if (request.headers.get('Origin') !== url.origin) return new Response('Forbidden', { status: 403 })
@@ -21,11 +26,13 @@ export class Chat extends DurableObject<Env> {
   private polls = new Map<string, PollData>()
   private games = new Map<string, GameData>()
 
-  fetch() {
+  fetch(request: Request) {
     const [client, server] = Object.values(new WebSocketPair())
     const taken = new Set(this.sockets().map(socket => nicknameKey(this.guest(socket).name)))
+    const country = request.cf?.country
+    const prefix = country && country !== 'KR' && country !== 'XX' && country !== 'T1' ? 'Guest' : '손님'
     let name: string
-    do { name = '손님' + (1000 + crypto.getRandomValues(new Uint16Array(1))[0] % 9000) } while (taken.has(nicknameKey(name)))
+    do { name = prefix + (1000 + crypto.getRandomValues(new Uint16Array(1))[0] % 9000) } while (taken.has(nicknameKey(name)))
     const guest = { id: crypto.randomUUID(), name, room: '', queued: 0, last: 0, status: 'chatting' as const }
     this.ctx.acceptWebSocket(server)
     this.save(server, guest)
