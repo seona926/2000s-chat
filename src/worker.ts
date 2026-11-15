@@ -1,11 +1,37 @@
 import { DurableObject } from 'cloudflare:workers'
-import { rooms, type ChatStyle, type GameRound, type Line, type Member, type MemberStatus, type RoomPoll } from './rooms'
+import { rooms, type ChatStyle, type GameRound, type Line, type Member, type MemberStatus, type RoomInstance, type RoomPoll } from './rooms'
 
 type Env = { CHAT: DurableObjectNamespace<Chat>; ASSETS: Fetcher }
 type Guest = Member & { room: string; queued: number; last: number; status: MemberStatus }
 type PollData = Omit<RoomPoll, 'myVote'> & { room: string; voters: Record<string, string> }
 type GameData = Omit<GameRound, 'players' | 'joined'> & { room: string; players: Record<string, { member: Member; score: number }> }
 const nicknameKey = (name: string) => name.normalize('NFKC').toLocaleLowerCase('ko-KR').replace(/\s+/g, ' ')
+const ROOM_CAPACITY = 25
+const publicRoomIds = new Set(rooms.map(room => room.id))
+
+function publicRoom(value: string) {
+  const match = /^([a-z]+)(?::([1-9]\d*))?$/.exec(value)
+  if (!match || !publicRoomIds.has(match[1])) return null
+  const number = match[2] ? Number(match[2]) : 1
+  if (!Number.isSafeInteger(number) || (match[2] && number < 2)) return null
+  return { base: match[1], number }
+}
+
+function roomId(base: string, number: number) {
+  return number === 1 ? base : `${base}:${number}`
+}
+
+function roomInstances(base: string, guests: Guest[]): RoomInstance[] {
+  const counts = new Map<number, number>()
+  for (const guest of guests) {
+    const parsed = publicRoom(guest.room)
+    if (parsed?.base === base) counts.set(parsed.number, (counts.get(parsed.number) ?? 0) + 1)
+  }
+  const highest = Math.max(1, ...counts.keys())
+  const instances = Array.from({ length: highest }, (_, index) => ({ id: roomId(base, index + 1), number: index + 1, count: counts.get(index + 1) ?? 0 }))
+  if (instances.every(instance => instance.count >= ROOM_CAPACITY)) instances.push({ id: roomId(base, highest + 1), number: highest + 1, count: 0 })
+  return instances
+}
 
 export default {
   fetch(request: Request, env: Env) {
@@ -62,12 +88,13 @@ export class Chat extends DurableObject<Env> {
   private presence() {
     const sockets = this.sockets()
     const guests = sockets.map(socket => this.guest(socket))
-    const counts = Object.fromEntries(rooms.map(room => [room.id, guests.filter(guest => guest.room === room.id).length]))
+    const subroomsByRoom = Object.fromEntries(rooms.map(room => [room.id, roomInstances(room.id, guests)])) as Record<string, RoomInstance[]>
+    const counts = Object.fromEntries(rooms.map(room => [room.id, subroomsByRoom[room.id].reduce((total, instance) => total + instance.count, 0)]))
     const waitingCount = guests.filter(guest => guest.queued > 0).length
     sockets.forEach((socket, index) => {
       const room = guests[index].room
       const members = room ? guests.filter(guest => guest.room === room).map(({ id, name, status }) => ({ id, name, status })) : []
-      this.send(socket, { type: 'presence', total: guests.length, waitingCount, countsByRoom: counts, members })
+      this.send(socket, { type: 'presence', total: guests.length, waitingCount, countsByRoom: counts, subroomsByRoom, roomCapacity: ROOM_CAPACITY, members })
     })
   }
 
@@ -169,16 +196,26 @@ export class Chat extends DurableObject<Env> {
         guest.status = value
         this.save(socket, guest)
         break
-      case 'join':
-        if (!rooms.some(room => room.id === value)) return
+      case 'join': {
+        const requested = publicRoom(value)
+        if (!requested) return
+        const guests = this.sockets().map(other => this.guest(other))
+        const instances = roomInstances(requested.base, guests.filter(other => other.id !== guest.id))
+        const destination = value === requested.base ? instances.find(instance => instance.count < ROOM_CAPACITY) : instances.find(instance => instance.id === value)
+        if (!destination || destination.count >= ROOM_CAPACITY) {
+          this.send(socket, { type: 'notice', text: '선택한 방이 가득 찼습니다. 다른 방을 선택해 주세요.' })
+          return
+        }
+        if (guest.room === destination.id) return
         this.leave(socket, guest)
-        guest.room = value
+        guest.room = destination.id
         this.save(socket, guest)
-        this.send(socket, { type: 'room', room: value })
-        this.line(value, `${guest.name}님이 입장했습니다. 반가워요! 오늘의 아재개그도 함께 봐요.`)
-        this.sendPoll(value)
-        this.sendGame(value)
+        this.send(socket, { type: 'room', room: destination.id })
+        this.line(destination.id, `${guest.name}님이 입장했습니다. 반가워요! 오늘의 아재개그도 함께 봐요.`)
+        this.sendPoll(destination.id)
+        this.sendGame(destination.id)
         break
+      }
       case 'queue':
         if (guest.queued) return
         this.leave(socket, guest)

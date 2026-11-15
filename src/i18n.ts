@@ -8,6 +8,7 @@ export function translateServerText(text: string, lang: Lang) {
     '닉네임은 2~16자의 글자, 숫자, 공백, 밑줄 또는 하이픈으로 입력해 주세요.': 'Use 2–16 letters, numbers, spaces, underscores or hyphens for your nickname.',
     '이미 사용 중인 닉네임입니다.': 'This nickname is already in use.',
     '이 방에서 진행 중인 투표가 이미 있습니다.': 'A poll is already open in this room.',
+    '선택한 방이 가득 찼습니다. 다른 방을 선택해 주세요.': 'That room is full. Please choose another one.',
     '투표 질문과 선택지를 확인해 주세요. (선택지 2~4개)': 'Check the poll question and add 2–4 choices.',
     '이 방에서 진행 중인 테트리스 라운드가 있습니다.': 'A Tetris round is already in progress in this room.',
     '상대가 채팅방을 나갔습니다. 접속자 목록에서 다시 선택해 주세요.': 'That person left the room. Please choose someone else.',

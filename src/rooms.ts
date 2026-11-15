@@ -16,6 +16,7 @@ export const rooms = [
 ]
 export type MemberStatus = 'chatting' | 'away' | 'gaming' | 'busy'
 export type Member = { id: string; name: string; status?: MemberStatus }
+export type RoomInstance = { id: string; number: number; count: number }
 export type ChatStyle = { font: string; size: number; color: string; bold: boolean; italic: boolean; underline: boolean }
 export type Line = { id: string; at: number; text: string; from?: Member; whisperTo?: Member; style?: ChatStyle; image?: string }
 export type PollOption = { id: string; text: string; votes: number }

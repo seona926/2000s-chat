@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
-import { rooms, type ChatStyle, type GameRound, type Line, type Member, type MemberStatus, type RoomPoll } from './rooms'
+import { rooms, type ChatStyle, type GameRound, type Line, type Member, type MemberStatus, type RoomInstance, type RoomPoll } from './rooms'
 import { TetrisBoard } from './tetris'
 import { translateServerText, type Lang } from './i18n'
 import './style.css'
@@ -12,6 +12,8 @@ type ChatEvent = {
   room?: string
   line?: Line
   countsByRoom?: Record<string, number>
+  subroomsByRoom?: Record<string, RoomInstance[]>
+  roomCapacity?: number
   total?: number
   waitingCount?: number
   members?: Member[]
@@ -134,6 +136,9 @@ function App() {
   const [waiting, setWaiting] = useState(false)
   const [ended, setEnded] = useState(false)
   const [counts, setCounts] = useState<Record<string, number>>({})
+  const [subrooms, setSubrooms] = useState<Record<string, RoomInstance[]>>({})
+  const [roomCapacity, setRoomCapacity] = useState(25)
+  const [expandedRoom, setExpandedRoom] = useState<string | null>(null)
   const [total, setTotal] = useState(0)
   const [waitingCount, setWaitingCount] = useState(0)
   const [members, setMembers] = useState<Member[]>([])
@@ -246,6 +251,8 @@ function App() {
           case 'nickError': setNickError(event.text ?? '닉네임을 변경하지 못했습니다.'); break
           case 'presence':
             setCounts(event.countsByRoom ?? {})
+            setSubrooms(event.subroomsByRoom ?? {})
+            setRoomCapacity(event.roomCapacity ?? 25)
             setTotal(event.total ?? 0)
             setWaitingCount(event.waitingCount ?? 0)
             setMembers(event.members ?? [])
@@ -402,17 +409,25 @@ function App() {
   function roomList(list: typeof rooms, active = false) {
     return (
       <ul className={'room-list' + (active ? ' active-list' : '')}>
-        {list.map(item => <li key={item.id}>
-          <div><button className="link room-link" disabled={!online} onClick={() => send('join', item.id)}>{en ? item.nameEn : item.name}</button>{!active && <small>{en ? item.aboutEn : item.about}</small>}</div>
-          <span className={counts[item.id] ? 'occupied' : 'vacant'}>{online ? en ? `${counts[item.id] ?? 0} here` : (counts[item.id] ?? 0) + '명' : '—'}</span>
-        </li>)}
+        {list.map(item => {
+          const instances = subrooms[item.id] ?? [{ id: item.id, number: 1, count: counts[item.id] ?? 0 }]
+          const expanded = expandedRoom === item.id
+          return <li className="room-entry" key={item.id}>
+            <div className="room-entry-main"><button className="link room-link" disabled={!online} onClick={() => send('join', item.id)}>{en ? item.nameEn : item.name}</button>{!active && <small>{en ? item.aboutEn : item.about}</small>}</div>
+            <div className="room-entry-meta"><span className={counts[item.id] ? 'occupied' : 'vacant'}>{online ? en ? `${counts[item.id] ?? 0} here` : (counts[item.id] ?? 0) + '명' : '—'}</span><button className="link room-list-toggle" type="button" aria-expanded={expanded} onClick={() => setExpandedRoom(expanded ? null : item.id)}>{tr('방 목록', 'Rooms')} {expanded ? '▴' : '▾'}</button></div>
+            {expanded && <div className="room-instance-list" role="group" aria-label={en ? `${item.nameEn} rooms` : `${item.name} 방 목록`}>{instances.map(instance => <button className="room-instance-button" type="button" key={instance.id} disabled={!online || instance.count >= roomCapacity} onClick={() => send('join', instance.id)}><span>{en ? `Room ${instance.number}` : `${instance.number}번방`}</span><span>{instance.count}/{roomCapacity}{en ? ' here' : '명'}</span>{instance.count >= roomCapacity && <small>{tr('가득 참', 'Full')}</small>}</button>)}</div>}
+          </li>
+        })}
       </ul>
     )
   }
 
   const pair = room.startsWith('pair:')
+  const baseRoomId = pair ? '' : room.split(':')[0]
+  const currentRoomNumber = pair ? 0 : Number(room.split(':')[1] ?? 1)
   const pairPeer = pair ? members.find(member => member.id !== id) ?? lines.find(line => line.from && line.from.id !== id)?.from : undefined
-  const current = rooms.find(item => item.id === room)
+  const current = rooms.find(item => item.id === baseRoomId)
+  const currentInstances = subrooms[baseRoomId] ?? (room ? [{ id: room, number: currentRoomNumber, count: members.length }] : [])
   const whisperRecipient = members.find(member => member.id === whisperToId && !blockedIds.includes(member.id))
   const activeRooms = rooms.filter(item => (counts[item.id] ?? 0) > 0).sort((a, b) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0))
   const previewStyle = {
@@ -467,13 +482,14 @@ function App() {
         </aside>
         </div>
       </> : <section className={'window panel chat-bg-' + chatBackground} aria-label={tr('채팅방', 'Chat room')}>
-        <div className="bar chat-title"><h1>{pair ? tr('랜덤 1:1 채팅', 'Random 1:1 Chat') : en ? current?.nameEn : current?.name}</h1><div className="chat-title-actions"><div className="language-switch" role="group" aria-label={tr('언어 선택', 'Language')}><button type="button" aria-pressed={!en} onClick={() => chooseLang('ko')}>한국어</button><button type="button" aria-pressed={en} onClick={() => chooseLang('en')}>EN</button></div><button className="classic" onClick={() => send('leave')}>{tr('← 로비로', '← Lobby')}</button></div></div>
+        <div className="bar chat-title"><h1>{pair ? tr('랜덤 1:1 채팅', 'Random 1:1 Chat') : `${en ? current?.nameEn : current?.name} · ${en ? `Room ${currentRoomNumber}` : `${currentRoomNumber}번방`}`}</h1><div className="chat-title-actions"><div className="language-switch" role="group" aria-label={tr('언어 선택', 'Language')}><button type="button" aria-pressed={!en} onClick={() => chooseLang('ko')}>한국어</button><button type="button" aria-pressed={en} onClick={() => chooseLang('en')}>EN</button></div><button className="classic" onClick={() => send('leave')}>{tr('← 로비로', '← Lobby')}</button></div></div>
         <div className="chat-menu"><span>{pair ? ended ? tr('대화 종료', 'Chat ended') : pairPeer && blockedIds.includes(pairPeer.id) ? tr('상대 차단됨', 'Partner blocked') : tr('상대와 연결됨', 'Connected to a partner') : en ? current?.aboutEn : current?.about}</span>
           <div className="chat-actions"><label className="status-control">{tr('내 상태', 'Status')} <select aria-label={tr('내 접속 상태', 'My status')} value={members.find(member => member.id === id)?.status ?? 'chatting'} onChange={event => send('status', event.target.value)}>{(['chatting', 'away', 'gaming', 'busy'] as const).map(status => <option key={status} value={status}>{statusLabel(status, lang)}</option>)}</select></label><button className="link" onClick={() => openDialog('nick')}>{tr('닉네임 변경', 'Change name')}</button>
           {pairPeer && <button className="link" aria-pressed={blockedIds.includes(pairPeer.id)} aria-label={`${pairPeer.name} ${blockedIds.includes(pairPeer.id) ? tr('차단 해제', 'Unblock') : tr('차단', 'Block')}`} title={tr('이 접속에서 내 화면에만 적용됩니다', 'Only affects what you see during this visit')} onClick={() => toggleBlock(pairPeer.id)}>{blockedIds.includes(pairPeer.id) ? tr('차단 해제', 'Unblock') : tr('상대 차단', 'Block partner')}</button>}
           {pair && <button className="link" onClick={() => send('queue')}>{tr('다음 상대', 'Next partner')}</button>}
           {!pair && <button className="link member-toggle" aria-expanded={showMembers} onClick={() => setShowMembers(!showMembers)}>{en ? `${members.length} people` : `접속자 ${members.length}명`}</button>}</div>
         </div>
+        {!pair && <div className="room-instance-strip" aria-label={en ? `${current?.nameEn} rooms` : `${current?.name} 방 목록`}><strong>{tr('방 목록', 'Rooms')}</strong><div className="room-instance-scroll">{currentInstances.map(instance => <button type="button" key={instance.id} className={'room-instance-tab' + (instance.id === room ? ' selected' : '')} aria-current={instance.id === room ? 'location' : undefined} disabled={!online || instance.id === room || instance.count >= roomCapacity} onClick={() => send('join', instance.id)}>{en ? `Room ${instance.number}` : `${instance.number}번방`} <span>{instance.count}/{roomCapacity}{en ? '' : '명'}</span></button>)}</div></div>}
         {!pair && <div className="room-tools"><button className="tool-button" disabled={Boolean(poll && !poll.closed)} onClick={() => openDialog('poll')}>🗳️ {tr('투표 만들기', 'Create poll')}</button><button className={'tool-button' + (activeTab === 'game' ? ' selected' : '')} aria-current={activeTab === 'game' ? 'page' : undefined} onClick={() => setActiveTab(activeTab === 'game' ? 'chat' : 'game')}>🎮 {tr('테트리스', 'Tetris')}{gameRound && !gameRound.ended ? tr(' · 진행 중', ' · Live') : ''}</button></div>}
         {!pair && <div className="daily-phrase"><strong>{tr('오늘의 아재개그', 'Conversation starter')}</strong><span>{en ? 'What made you smile today?' : <><b>Q.</b> {dailyJoke.question} <b>A.</b> {dailyJoke.answer}</>}</span></div>}
         <div className="workspace">
